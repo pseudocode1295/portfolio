@@ -1,0 +1,313 @@
+---
+title: "Building Multi-Agent AI with MCP Protocol on Azure AI Foundry"
+date: "2026-02-28"
+description: "How we replaced three disconnected dashboards with a single conversational AI platform — and what we learned about agentic architecture in production."
+tags: ["AI", "MCP", "Azure AI Foundry", "Multi-Agent", "Architecture"]
+---
+
+*How we replaced three disconnected dashboards with a single conversational AI platform — and what we learned about agentic architecture in production.*
+
+---
+
+## The Problem Nobody Wanted to Talk About
+
+Here's a scene I've watched play out at every enterprise I've worked with: an analyst opens Dashboard A, copies a number, switches to Dashboard B, cross-references it, opens Dashboard C, runs a filter, then pastes everything into a spreadsheet. Fifteen minutes gone. Multiply that by forty analysts, five times a day, and you're looking at thousands of hours a year burned on *navigating between tools* — not actually analyzing anything.
+
+When a major enterprise client brought us in, that's exactly what we found. Three analytical platforms, each owned by a different team, each with its own login, its own data model, its own quirks. The compliance team lived in one. The sales analytics team lived in another. The research team had their own portal. Nobody had a unified view, and every cross-functional question turned into a scavenger hunt.
+
+The ask was straightforward: **"Can we just ask questions in plain English and get answers, regardless of which system has the data?"**
+
+Straightforward ask. Non-trivial architecture.
+
+What we ended up building was a multi-agent AI platform on Azure AI Foundry, powered by the Model Context Protocol (MCP), where a central orchestrator routes natural language queries to domain-specific sub-agents, each backed by its own set of tools. One chat interface. Five specialized agents. Zero dashboard-hopping.
+
+This post is the story of how we built it, why we made the architectural choices we did, and what I'd do differently next time.
+
+---
+
+## First, Let's Talk About MCP — And Why It Matters
+
+If you've been following the AI tooling space, you've probably heard of the **Model Context Protocol (MCP)**. If you haven't, here's the short version:
+
+MCP is a standardized protocol that defines how AI agents discover and invoke external tools. Think of it like a USB port for AI capabilities. Just as any USB device can plug into any USB port without the computer needing a custom driver for each device, any tool that implements the MCP spec can be discovered and used by any MCP-compatible agent.
+
+Before MCP, connecting an LLM to external tools meant writing custom integration code for every single tool. Your agent needs to query a database? Write a custom function. It needs to call an API? Write another custom function. It needs to generate a report? You get the idea. Each integration was bespoke, tightly coupled, and painful to maintain.
+
+MCP changes this by defining a standard contract:
+
+1. **Tool Declaration** — Each tool describes itself: what it does, what parameters it accepts, what it returns.
+2. **Tool Discovery** — Agents can call `list_tools()` to dynamically discover what tools are available at runtime.
+3. **Tool Invocation** — A standardized call/response format so the agent doesn't need to know *how* a tool works internally, just *what* it does.
+
+Here's what a simple MCP tool definition looks like:
+
+```python
+from mcp.server import Server
+from mcp.types import Tool, TextContent
+
+app = Server("analytics-service")
+
+@app.tool()
+async def get_metrics_summary(
+    category: str,
+    time_range: str = "last_30_days",
+    region: str = "all"
+) -> list[TextContent]:
+    """
+    Retrieve aggregated metrics summary for a given category.
+    
+    Args:
+        category: The metric category to query (e.g., 'revenue', 'engagement')
+        time_range: Time window for the query
+        region: Geographic filter
+    
+    Returns:
+        Formatted summary of the requested metrics.
+    """
+    # Query your data source
+    results = await query_metrics_store(category, time_range, region)
+    
+    summary = format_as_natural_language(results)
+    return [TextContent(type="text", text=summary)]
+```
+
+That's it. That tool is now discoverable by any MCP-compatible orchestrator. The agent doesn't need to know that this tool talks to a Cosmos DB behind the scenes, or that it applies row-level security, or that it caches results in Redis. It just knows: *"I can call `get_metrics_summary` with a category and get back a text summary."*
+
+This separation of concerns is what makes MCP powerful — and what made our architecture possible.
+
+---
+
+## Why MCP Over Custom REST APIs?
+
+This is the first question our architecture review board asked, and it's a fair one. We already had REST APIs. Why add another protocol?
+
+The answer comes down to **extensibility without orchestrator changes**.
+
+With a REST API approach, every time you add a new tool, you need to:
+1. Build the API endpoint
+2. Update the orchestrator to know about the new endpoint
+3. Write prompt engineering that teaches the LLM how and when to use it
+4. Redeploy the orchestrator
+
+With MCP, adding a new capability is:
+1. Build the tool, deploy it as a container
+2. Register it with the MCP server
+3. Done. The orchestrator discovers it automatically at runtime.
+
+No orchestrator redeployment. No prompt updates. The new tool declares its own description, parameters, and purpose. The LLM reads that declaration and figures out when to use it.
+
+In our case, we started with three tools and grew to twelve over four months. If we'd wired each one manually, that's twelve rounds of orchestrator changes, testing, and redeployment. With MCP, we deployed new tool containers and they just... appeared. The orchestrator's next `list_tools()` call picked them up.
+
+That said — and I'll be honest here — MCP adds complexity. There's a protocol layer to maintain, serialization to handle, and debugging gets harder when you can't just curl an endpoint. It's a tradeoff. For a system with two or three static tools, MCP is overkill. For a system that needs to grow organically, it's a force multiplier.
+
+---
+
+## The Multi-Agent Architecture: Why Not Just One Big Agent?
+
+Early in the project, we tried the obvious approach: one agent, all the tools, one system prompt. It worked... sort of. For simple queries, it was fine. But as we added more tools, we hit three walls:
+
+**Wall 1: Context window saturation.** With twelve tools, each with detailed descriptions and parameter schemas, we were burning 30-40% of our context window just on tool definitions before the user even asked a question. That left less room for conversation history, retrieval context, and reasoning.
+
+**Wall 2: Routing confusion.** When an LLM has twelve tools available, it sometimes picks the wrong one. A query about "compliance screening results" might accidentally trigger the "search documents" tool instead of the "compliance check" tool because the descriptions share keywords. More tools = more ambiguity.
+
+**Wall 3: Prompt engineering nightmares.** Trying to write a single system prompt that accurately guides the LLM across five completely different domains (compliance, sales analytics, document search, report generation, and media screening) was like writing one job description for five different roles. It was vague, contradictory, and brittle.
+
+The solution was to split into **domain-specific sub-agents**, each with a focused system prompt and a small, relevant set of tools:
+
+| Agent | Domain | Tools |
+|-------|--------|-------|
+| Risk Assessment Agent | Regulatory checks, due diligence | 3 tools |
+| Business Insights Agent | Revenue metrics, pipeline analytics | 2 tools |
+| Knowledge Agent | Document retrieval, knowledge base | 2 tools |
+| Reporting Agent | Report generation, data export | 3 tools |
+| Intelligence Agent | External monitoring, signal detection | 2 tools |
+
+Each sub-agent is an expert in its domain. Its system prompt is specific and detailed. Its tool set is small enough that the LLM almost never picks the wrong tool. And its context window is free to focus on the actual query.
+
+The orchestrator's job is simple: classify the user's intent and route to the right sub-agent. That's a much easier problem for an LLM to solve than "understand everything and do everything."
+
+---
+
+## The Dual-Server Pattern: MCP + FastAPI
+
+Here's an architectural detail that took us a while to figure out: **MCP alone isn't enough for production.**
+
+MCP is great at tool discovery and invocation. But it doesn't natively handle authentication, rate limiting, response caching, health checks, metrics, or CORS.
+
+So we ended up with what I call the **dual-server pattern**: each sub-agent service runs two servers on two ports.
+
+**Port 8000 (MCP Server)** handles the AI protocol — tool listing, tool calling, response formatting. This is what the orchestrator talks to when it needs to invoke domain capabilities.
+
+**Port 8001 (FastAPI Server)** handles everything else — the enterprise plumbing. Authentication middleware validates JWT tokens. Rate limiting prevents any single user from overwhelming the service. Caching layers (backed by Redis) store frequently requested results. Health endpoints let the load balancer know if the service is alive.
+
+```python
+# fastapi_server.py — Port 8001
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="Analytics Sub-Agent API")
+
+app.add_middleware(CORSMiddleware, allow_origins=["*"])
+
+@app.middleware("http")
+async def auth_middleware(request, call_next):
+    token = request.headers.get("Authorization")
+    if not validate_token(token):
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+    return await call_next(request)
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "tools_loaded": get_tool_count()}
+
+@app.post("/invoke")
+async def invoke_with_caching(request: ToolRequest):
+    cache_key = generate_cache_key(request)
+    cached = await redis_client.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    
+    result = await mcp_client.call_tool(request.tool_name, request.arguments)
+    await redis_client.setex(cache_key, 300, json.dumps(result))
+    return result
+```
+
+The FastAPI server acts as a gateway in front of the MCP server. Could we have put everything in one server? Sure. But separating concerns meant we could update tool logic without touching auth logic, and vice versa. In a team of eight engineers, that separation of ownership mattered.
+
+---
+
+## How a Query Flows Through the System
+
+Let me walk you through what happens when a user types: *"Show me the compliance screening results for accounts flagged in Q3"*
+
+**Step 1: The orchestrator receives the query.** The orchestrator is an Azure AI Foundry agent with a system prompt focused on intent classification. It doesn't have domain tools — it has routing logic.
+
+**Step 2: Intent classification.** The orchestrator determines this is a compliance query (not sales, not search, not reports). It selects the Risk Assessment Agent.
+
+**Step 3: The orchestrator forwards the query to the Risk Assessment Agent.** This is an internal API call to the compliance sub-agent's FastAPI endpoint.
+
+**Step 4: Auth and rate limiting.** The FastAPI middleware validates the user's token and checks rate limits.
+
+**Step 5: Cache check.** The service checks Redis for a cached response. Cache hit? Return immediately. Cache miss? Continue.
+
+**Step 6: The Risk Assessment Agent's LLM processes the query.** It has three tools available (discovered via `list_tools()`). It determines the right tool and constructs the call:
+
+```python
+tool_call = {
+    "name": "get_screening_results",
+    "arguments": {
+        "status": "flagged",
+        "quarter": "Q3",
+        "fiscal_year": "2025"
+    }
+}
+```
+
+**Step 7: MCP tool execution.** The tool queries the underlying data store, applies row-level security, and returns structured results.
+
+**Step 8: Response synthesis.** The sub-agent's LLM synthesizes a natural language response: *"In Q3 FY25, 47 accounts were flagged during compliance screening. Here's the breakdown by region..."*
+
+**Step 9: Stream back to user.** Total time: 3-6 seconds for a cache miss, under 500ms for a cache hit.
+
+---
+
+## Tool Discovery: The Magic of list_tools()
+
+One of the most elegant aspects of MCP is dynamic tool discovery:
+
+```python
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async def discover_agent_capabilities(agent_url: str) -> list[dict]:
+    """Connect to a sub-agent's MCP server and discover its tools."""
+    async with streamablehttp_client(url=f"{agent_url}/mcp") as (r, w, _):
+        async with ClientSession(r, w) as session:
+            await session.initialize()
+            
+            tools_response = await session.list_tools()
+            
+            capabilities = []
+            for tool in tools_response.tools:
+                capabilities.append({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.inputSchema
+                })
+            
+            return capabilities
+
+# At startup, discover all sub-agent capabilities
+all_capabilities = {}
+for agent_name, agent_url in SUB_AGENTS.items():
+    all_capabilities[agent_name] = await discover_agent_capabilities(agent_url)
+```
+
+This runs at orchestrator startup and periodically refreshes. When a new tool is deployed to any sub-agent, the orchestrator picks it up on the next refresh cycle. No redeployment, no configuration change.
+
+---
+
+## Multi-Region Deployment with Circuit Breaker
+
+We deployed across three Azure regions for latency and resilience. Each region runs the full stack — orchestrator, all five sub-agents, Redis, and the data layer.
+
+We implemented a **circuit breaker pattern** that monitors sub-agent health and automatically reroutes traffic:
+
+```python
+import time
+from enum import Enum
+
+class CircuitState(Enum):
+    CLOSED = "closed"        # Normal operation
+    OPEN = "open"            # Failing, reject requests
+    HALF_OPEN = "half_open"  # Testing recovery
+
+class CircuitBreaker:
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 30):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.failure_count = 0
+        self.state = CircuitState.CLOSED
+        self.last_failure_time = 0.0
+
+    def record_success(self):
+        self.failure_count = 0
+        self.state = CircuitState.CLOSED
+
+    def record_failure(self):
+        self.failure_count += 1
+        if self.failure_count >= self.failure_threshold:
+            self.state = CircuitState.OPEN
+            self.last_failure_time = time.time()
+
+    def can_execute(self) -> bool:
+        if self.state == CircuitState.CLOSED:
+            return True
+        if self.state == CircuitState.OPEN:
+            if time.time() - self.last_failure_time > self.recovery_timeout:
+                self.state = CircuitState.HALF_OPEN
+                return True
+            return False
+        return True  # HALF_OPEN: allow one test request
+```
+
+When a region's sub-agent starts failing, the circuit breaker trips after five consecutive failures. For the next 30 seconds, all requests to that agent are immediately rerouted to a healthy region. After 30 seconds, a single test request is allowed through — if it succeeds, the circuit closes and normal traffic resumes.
+
+---
+
+## Key Takeaways
+
+If you're building multi-agent AI systems, here's what I'd recommend:
+
+1. **Split agents by domain, not by function.** Each agent should be an expert in one area, with a focused prompt and small tool set.
+2. **Use MCP for extensibility.** If your tool count is growing, MCP's dynamic discovery is worth the protocol overhead.
+3. **Don't skip the enterprise plumbing.** Auth, caching, rate limiting, and health checks are not optional for production systems.
+4. **The dual-server pattern works.** MCP for AI protocol, FastAPI for enterprise middleware. Separation of concerns matters.
+5. **Circuit breakers are essential for multi-region.** Plan for failure. Automatic failover is the difference between "we had an outage" and "users didn't notice."
+6. **Monitor everything.** Build a tool registry dashboard. Know which tools are being called, how often, and how fast.
+
+The multi-agent pattern isn't the right choice for every AI application. But for enterprise platforms where multiple data sources need to be accessed through a single interface, it's been transformative.
+
+---
+
+*If you're building similar multi-agent systems and want to compare notes on MCP architecture, I'd love to hear from you. The ecosystem is evolving fast, and the more practitioners share their patterns, the better we all get.*
