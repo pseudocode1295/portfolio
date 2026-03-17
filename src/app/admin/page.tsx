@@ -131,15 +131,36 @@ interface CompanyProgressData {
 
 // Source → category lookup for the Companies tab
 const COMPANY_CATEGORY: Record<string, string> = {
+  // FAANG
   google: "FAANG", amazon: "FAANG", apple: "FAANG", microsoft: "FAANG", meta: "FAANG", netflix: "FAANG",
-  uber: "Big Tech", airbnb: "Big Tech", adobe: "Big Tech", atlassian: "Big Tech", salesforce: "Big Tech", linkedin: "Big Tech",
+  // Big Tech
+  uber: "Big Tech", airbnb: "Big Tech", adobe: "Big Tech", atlassian: "Big Tech", salesforce: "Big Tech",
+  linkedin: "Big Tech", snap: "Big Tech", pinterest: "Big Tech", lyft: "Big Tech", doordash: "Big Tech",
+  shopify: "Big Tech", twitter: "Big Tech", palantir: "Big Tech", instacart: "Big Tech",
+  // Product
   stripe: "Product", figma: "Product", notion: "Product", canva: "Product", dropbox: "Product",
   grammarly: "Product", twilio: "Product", zendesk: "Product", rippling: "Product",
   postman: "Product", browserstack: "Product", intuit: "Product", gong: "Product", twitch: "Product",
+  zoom: "Product", hubspot: "Product", datadog: "Product", cloudflare: "Product", coinbase: "Product",
+  airtable: "Product", asana: "Product", miro: "Product", loom: "Product", robinhood: "Product",
+  plaid: "Product", brex: "Product",
+  // Indian Unicorn
   razorpay: "Indian Unicorn", freshworks: "Indian Unicorn", cred: "Indian Unicorn",
   meesho: "Indian Unicorn", urbancompany: "Indian Unicorn", groww: "Indian Unicorn",
-  zepto: "Indian Unicorn", phonepe: "Indian Unicorn", swiggy: "Indian Unicorn",
-  paypal: "MNC", walmart: "MNC", cisco: "MNC", workday: "MNC", wayfair: "MNC", segment: "MNC",
+  zepto: "Indian Unicorn", phonepe: "Indian Unicorn", swiggy: "Indian Unicorn", zomato: "Indian Unicorn",
+  nykaa: "Indian Unicorn", chargebee: "Indian Unicorn", clevertap: "Indian Unicorn", dream11: "Indian Unicorn",
+  dunzo: "Indian Unicorn", ola: "Indian Unicorn", delhivery: "Indian Unicorn", moengage: "Indian Unicorn",
+  darwinbox: "Indian Unicorn", inmobi: "Indian Unicorn", leadsquared: "Indian Unicorn", exotel: "Indian Unicorn",
+  // MNC
+  paypal: "MNC", walmart: "MNC", cisco: "MNC", workday: "MNC", wayfair: "MNC",
+  thoughtworks: "MNC", epam: "MNC", globallogic: "MNC", sapient: "MNC", elastic: "MNC", splunk: "MNC", okta: "MNC",
+  // AI/ML
+  openai: "AI/ML", anthropic: "AI/ML", cohere: "AI/ML", scaleai: "AI/ML", huggingface: "AI/ML",
+  wandb: "AI/ML", stabilityai: "AI/ML", mistral: "AI/ML", runway: "AI/ML", togetherai: "AI/ML",
+  // Data & Infra
+  mongodb: "Data & Infra", snowflake: "Data & Infra", databricks: "Data & Infra", confluent: "Data & Infra",
+  hashicorp: "Data & Infra", gitlab: "Data & Infra", pagerduty: "Data & Infra", vercel: "Data & Infra",
+  retool: "Data & Infra", airbyte: "Data & Infra",
 };
 
 function getCompanyCategory(source: string): string {
@@ -805,7 +826,7 @@ export default function AdminDashboard() {
 
         {/* Companies Tab */}
         {activeTab === "companies" && (() => {
-          const categories = ["All", "FAANG", "Big Tech", "Product", "Indian Unicorn", "MNC"];
+          const categories = ["All", "FAANG", "Big Tech", "Product", "Indian Unicorn", "MNC", "AI/ML", "Data & Infra"];
           const filtered = companyCategoryFilter === "All"
             ? companyJobs
             : companyJobs.filter(j => getCompanyCategory(j.source) === companyCategoryFilter);

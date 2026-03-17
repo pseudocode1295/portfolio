@@ -4,7 +4,7 @@ import type { AgentResult } from "./types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type CompanyCategory = "FAANG" | "Big Tech" | "Product" | "Indian Unicorn" | "MNC";
+export type CompanyCategory = "FAANG" | "Big Tech" | "Product" | "Indian Unicorn" | "MNC" | "AI/ML" | "Data & Infra";
 
 export interface CompanyConfig {
   name: string;
@@ -38,7 +38,7 @@ export interface CompanyProgress {
 // ─── Company List ─────────────────────────────────────────────────────────────
 
 export const COMPANIES: CompanyConfig[] = [
-  // ── FAANG ──────────────────────────────────────────────────────────────────
+  // ── FAANG (6) ──────────────────────────────────────────────────────────────
   { name: "Google",    slug: "google",    category: "FAANG", scrapeType: "google" },
   { name: "Amazon",    slug: "amazon",    category: "FAANG", scrapeType: "amazon" },
   { name: "Apple",     slug: "apple",     category: "FAANG", scrapeType: "apple" },
@@ -46,34 +46,53 @@ export const COMPANIES: CompanyConfig[] = [
   { name: "Meta",      slug: "meta",      category: "FAANG", scrapeType: "greenhouse", boardId: "meta" },
   { name: "Netflix",   slug: "netflix",   category: "FAANG", scrapeType: "lever",      companyId: "netflix" },
 
-  // ── Big Tech ───────────────────────────────────────────────────────────────
-  { name: "Uber",       slug: "uber",       category: "Big Tech", scrapeType: "greenhouse", boardId: "uber" },
-  { name: "Airbnb",     slug: "airbnb",     category: "Big Tech", scrapeType: "greenhouse", boardId: "airbnb" },
-  { name: "Adobe",      slug: "adobe",      category: "Big Tech", scrapeType: "greenhouse", boardId: "adobe" },
-  { name: "Atlassian",  slug: "atlassian",  category: "Big Tech", scrapeType: "greenhouse", boardId: "atlassian" },
-  { name: "Salesforce", slug: "salesforce", category: "Big Tech", scrapeType: "greenhouse", boardId: "salesforce" },
-  { name: "LinkedIn",   slug: "linkedin",   category: "Big Tech", scrapeType: "greenhouse", boardId: "linkedin" },
+  // ── Big Tech (14) ─────────────────────────────────────────────────────────
+  { name: "Uber",        slug: "uber",        category: "Big Tech", scrapeType: "greenhouse", boardId: "uber" },
+  { name: "Airbnb",      slug: "airbnb",      category: "Big Tech", scrapeType: "greenhouse", boardId: "airbnb" },
+  { name: "Adobe",       slug: "adobe",       category: "Big Tech", scrapeType: "greenhouse", boardId: "adobe" },
+  { name: "Atlassian",   slug: "atlassian",   category: "Big Tech", scrapeType: "greenhouse", boardId: "atlassian" },
+  { name: "Salesforce",  slug: "salesforce",  category: "Big Tech", scrapeType: "greenhouse", boardId: "salesforce" },
+  { name: "LinkedIn",    slug: "linkedin",    category: "Big Tech", scrapeType: "greenhouse", boardId: "linkedin" },
+  { name: "Snap",        slug: "snap",        category: "Big Tech", scrapeType: "greenhouse", boardId: "snap" },
+  { name: "Pinterest",   slug: "pinterest",   category: "Big Tech", scrapeType: "greenhouse", boardId: "pinterest" },
+  { name: "Lyft",        slug: "lyft",        category: "Big Tech", scrapeType: "greenhouse", boardId: "lyft" },
+  { name: "DoorDash",    slug: "doordash",    category: "Big Tech", scrapeType: "greenhouse", boardId: "doordash" },
+  { name: "Shopify",     slug: "shopify",     category: "Big Tech", scrapeType: "greenhouse", boardId: "shopify" },
+  { name: "Twitter / X", slug: "twitter",    category: "Big Tech", scrapeType: "greenhouse", boardId: "twitter" },
+  { name: "Palantir",    slug: "palantir",    category: "Big Tech", scrapeType: "lever",      companyId: "palantir" },
+  { name: "Instacart",   slug: "instacart",   category: "Big Tech", scrapeType: "greenhouse", boardId: "instacart" },
 
-  // ── Product ────────────────────────────────────────────────────────────────
-  { name: "Stripe",        slug: "stripe",        category: "Product", scrapeType: "greenhouse", boardId: "stripe" },
-  { name: "Figma",         slug: "figma",          category: "Product", scrapeType: "greenhouse", boardId: "figma" },
-  { name: "Notion",        slug: "notion",         category: "Product", scrapeType: "greenhouse", boardId: "notion" },
-  { name: "Canva",         slug: "canva",          category: "Product", scrapeType: "greenhouse", boardId: "canva" },
-  { name: "Dropbox",       slug: "dropbox",        category: "Product", scrapeType: "greenhouse", boardId: "dropbox" },
-  { name: "Grammarly",     slug: "grammarly",      category: "Product", scrapeType: "greenhouse", boardId: "grammarly" },
-  { name: "Twilio",        slug: "twilio",         category: "Product", scrapeType: "greenhouse", boardId: "twilio" },
-  { name: "Zendesk",       slug: "zendesk",        category: "Product", scrapeType: "greenhouse", boardId: "zendesk" },
-  { name: "Rippling",      slug: "rippling",       category: "Product", scrapeType: "greenhouse", boardId: "rippling" },
-  { name: "Postman",       slug: "postman",        category: "Product", scrapeType: "greenhouse", boardId: "postmanlabs" },
-  { name: "BrowserStack",  slug: "browserstack",   category: "Product", scrapeType: "greenhouse", boardId: "browserstack" },
-  { name: "Intuit",        slug: "intuit",         category: "Product", scrapeType: "greenhouse", boardId: "intuit" },
-  { name: "Gong",          slug: "gong",           category: "Product", scrapeType: "greenhouse", boardId: "gong" },
-  { name: "Twitch",        slug: "twitch",         category: "Product", scrapeType: "greenhouse", boardId: "twitch" },
+  // ── Product Companies (26) ────────────────────────────────────────────────
+  { name: "Stripe",        slug: "stripe",       category: "Product", scrapeType: "greenhouse", boardId: "stripe" },
+  { name: "Figma",         slug: "figma",         category: "Product", scrapeType: "greenhouse", boardId: "figma" },
+  { name: "Notion",        slug: "notion",        category: "Product", scrapeType: "greenhouse", boardId: "notion" },
+  { name: "Canva",         slug: "canva",         category: "Product", scrapeType: "greenhouse", boardId: "canva" },
+  { name: "Dropbox",       slug: "dropbox",       category: "Product", scrapeType: "greenhouse", boardId: "dropbox" },
+  { name: "Grammarly",     slug: "grammarly",     category: "Product", scrapeType: "greenhouse", boardId: "grammarly" },
+  { name: "Twilio",        slug: "twilio",        category: "Product", scrapeType: "greenhouse", boardId: "twilio" },
+  { name: "Zendesk",       slug: "zendesk",       category: "Product", scrapeType: "greenhouse", boardId: "zendesk" },
+  { name: "Rippling",      slug: "rippling",      category: "Product", scrapeType: "greenhouse", boardId: "rippling" },
+  { name: "Postman",       slug: "postman",       category: "Product", scrapeType: "greenhouse", boardId: "postmanlabs" },
+  { name: "BrowserStack",  slug: "browserstack",  category: "Product", scrapeType: "greenhouse", boardId: "browserstack" },
+  { name: "Intuit",        slug: "intuit",        category: "Product", scrapeType: "greenhouse", boardId: "intuit" },
+  { name: "Gong",          slug: "gong",          category: "Product", scrapeType: "greenhouse", boardId: "gong" },
+  { name: "Twitch",        slug: "twitch",        category: "Product", scrapeType: "greenhouse", boardId: "twitch" },
+  { name: "Zoom",          slug: "zoom",          category: "Product", scrapeType: "greenhouse", boardId: "zoom" },
+  { name: "HubSpot",       slug: "hubspot",       category: "Product", scrapeType: "greenhouse", boardId: "hubspot" },
+  { name: "Datadog",       slug: "datadog",       category: "Product", scrapeType: "greenhouse", boardId: "datadoghq" },
+  { name: "Cloudflare",    slug: "cloudflare",    category: "Product", scrapeType: "greenhouse", boardId: "cloudflare" },
+  { name: "Coinbase",      slug: "coinbase",      category: "Product", scrapeType: "greenhouse", boardId: "coinbase" },
+  { name: "Airtable",      slug: "airtable",      category: "Product", scrapeType: "greenhouse", boardId: "airtable" },
+  { name: "Asana",         slug: "asana",         category: "Product", scrapeType: "greenhouse", boardId: "asana" },
+  { name: "Miro",          slug: "miro",          category: "Product", scrapeType: "greenhouse", boardId: "miro" },
+  { name: "Loom",          slug: "loom",          category: "Product", scrapeType: "greenhouse", boardId: "loom" },
+  { name: "Robinhood",     slug: "robinhood",     category: "Product", scrapeType: "greenhouse", boardId: "robinhood" },
+  { name: "Plaid",         slug: "plaid",         category: "Product", scrapeType: "greenhouse", boardId: "plaid" },
+  { name: "Brex",          slug: "brex",          category: "Product", scrapeType: "greenhouse", boardId: "brex" },
 
-  // ── Indian Unicorns ────────────────────────────────────────────────────────
+  // ── Indian Unicorns & Startups (22) ───────────────────────────────────────
   { name: "Razorpay",      slug: "razorpay",      category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "razorpay" },
   { name: "Freshworks",    slug: "freshworks",    category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "freshworks" },
-  { name: "BrowserStack",  slug: "browserstack2", category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "browserstack" },
   { name: "CRED",          slug: "cred",          category: "Indian Unicorn", scrapeType: "lever",      companyId: "cred" },
   { name: "Meesho",        slug: "meesho",        category: "Indian Unicorn", scrapeType: "lever",      companyId: "meesho" },
   { name: "Urban Company", slug: "urbancompany",  category: "Indian Unicorn", scrapeType: "lever",      companyId: "urbancompany" },
@@ -81,14 +100,57 @@ export const COMPANIES: CompanyConfig[] = [
   { name: "Zepto",         slug: "zepto",         category: "Indian Unicorn", scrapeType: "lever",      companyId: "zepto" },
   { name: "PhonePe",       slug: "phonepe",       category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "phonepe" },
   { name: "Swiggy",        slug: "swiggy",        category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "swiggy" },
+  { name: "Zomato",        slug: "zomato",        category: "Indian Unicorn", scrapeType: "lever",      companyId: "zomato" },
+  { name: "Nykaa",         slug: "nykaa",         category: "Indian Unicorn", scrapeType: "lever",      companyId: "nykaa" },
+  { name: "Chargebee",     slug: "chargebee",     category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "chargebee" },
+  { name: "CleverTap",     slug: "clevertap",     category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "clevertap" },
+  { name: "Dream11",       slug: "dream11",       category: "Indian Unicorn", scrapeType: "lever",      companyId: "dream11" },
+  { name: "Dunzo",         slug: "dunzo",         category: "Indian Unicorn", scrapeType: "lever",      companyId: "dunzo" },
+  { name: "Ola",           slug: "ola",           category: "Indian Unicorn", scrapeType: "lever",      companyId: "ola-cabs" },
+  { name: "Delhivery",     slug: "delhivery",     category: "Indian Unicorn", scrapeType: "lever",      companyId: "delhivery" },
+  { name: "MoEngage",      slug: "moengage",      category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "moengage" },
+  { name: "Darwinbox",     slug: "darwinbox",     category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "darwinbox" },
+  { name: "InMobi",        slug: "inmobi",        category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "inmobi" },
+  { name: "Leadsquared",   slug: "leadsquared",   category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "leadsquared" },
+  { name: "Exotel",        slug: "exotel",        category: "Indian Unicorn", scrapeType: "lever",      companyId: "exotel" },
 
-  // ── MNCs ───────────────────────────────────────────────────────────────────
-  { name: "PayPal",           slug: "paypal",    category: "MNC", scrapeType: "greenhouse", boardId: "paypal" },
+  // ── MNCs in India (12) ────────────────────────────────────────────────────
+  { name: "PayPal",            slug: "paypal",    category: "MNC", scrapeType: "greenhouse", boardId: "paypal" },
   { name: "Walmart Global Tech", slug: "walmart", category: "MNC", scrapeType: "greenhouse", boardId: "walmartglobaltech" },
-  { name: "Cisco",            slug: "cisco",     category: "MNC", scrapeType: "greenhouse", boardId: "cisco" },
-  { name: "Workday",          slug: "workday",   category: "MNC", scrapeType: "greenhouse", boardId: "workday" },
-  { name: "Wayfair",          slug: "wayfair",   category: "MNC", scrapeType: "greenhouse", boardId: "wayfair" },
-  { name: "Twilio Segment",   slug: "segment",   category: "MNC", scrapeType: "greenhouse", boardId: "segment" },
+  { name: "Cisco",             slug: "cisco",     category: "MNC", scrapeType: "greenhouse", boardId: "cisco" },
+  { name: "Workday",           slug: "workday",   category: "MNC", scrapeType: "greenhouse", boardId: "workday" },
+  { name: "Wayfair",           slug: "wayfair",   category: "MNC", scrapeType: "greenhouse", boardId: "wayfair" },
+  { name: "ThoughtWorks",      slug: "thoughtworks", category: "MNC", scrapeType: "greenhouse", boardId: "thoughtworks" },
+  { name: "EPAM Systems",      slug: "epam",      category: "MNC", scrapeType: "greenhouse", boardId: "epamsystems" },
+  { name: "GlobalLogic",       slug: "globallogic", category: "MNC", scrapeType: "greenhouse", boardId: "globallogic" },
+  { name: "Publicis Sapient",  slug: "sapient",   category: "MNC", scrapeType: "lever",      companyId: "publicis-sapient" },
+  { name: "Elastic",           slug: "elastic",   category: "MNC", scrapeType: "greenhouse", boardId: "elastic" },
+  { name: "Splunk",            slug: "splunk",    category: "MNC", scrapeType: "greenhouse", boardId: "splunk" },
+  { name: "Okta",              slug: "okta",      category: "MNC", scrapeType: "greenhouse", boardId: "okta" },
+
+  // ── AI / ML Companies (10) ────────────────────────────────────────────────
+  { name: "OpenAI",              slug: "openai",      category: "AI/ML", scrapeType: "greenhouse", boardId: "openai" },
+  { name: "Anthropic",           slug: "anthropic",   category: "AI/ML", scrapeType: "lever",      companyId: "anthropic" },
+  { name: "Cohere",              slug: "cohere",      category: "AI/ML", scrapeType: "greenhouse", boardId: "cohere" },
+  { name: "Scale AI",            slug: "scaleai",     category: "AI/ML", scrapeType: "greenhouse", boardId: "scaleai" },
+  { name: "Hugging Face",        slug: "huggingface", category: "AI/ML", scrapeType: "lever",      companyId: "huggingface" },
+  { name: "Weights & Biases",    slug: "wandb",       category: "AI/ML", scrapeType: "greenhouse", boardId: "wandb" },
+  { name: "Stability AI",        slug: "stabilityai", category: "AI/ML", scrapeType: "lever",      companyId: "stability-ai" },
+  { name: "Mistral AI",          slug: "mistral",     category: "AI/ML", scrapeType: "lever",      companyId: "mistral" },
+  { name: "Runway",              slug: "runway",      category: "AI/ML", scrapeType: "lever",      companyId: "runwayml" },
+  { name: "Together AI",         slug: "togetherai",  category: "AI/ML", scrapeType: "greenhouse", boardId: "togetherai" },
+
+  // ── Data & Infrastructure (10) ────────────────────────────────────────────
+  { name: "MongoDB",     slug: "mongodb",     category: "Data & Infra", scrapeType: "greenhouse", boardId: "mongodb" },
+  { name: "Snowflake",   slug: "snowflake",   category: "Data & Infra", scrapeType: "greenhouse", boardId: "snowflake" },
+  { name: "Databricks",  slug: "databricks",  category: "Data & Infra", scrapeType: "greenhouse", boardId: "databricks" },
+  { name: "Confluent",   slug: "confluent",   category: "Data & Infra", scrapeType: "greenhouse", boardId: "confluent" },
+  { name: "HashiCorp",   slug: "hashicorp",   category: "Data & Infra", scrapeType: "greenhouse", boardId: "hashicorp" },
+  { name: "GitLab",      slug: "gitlab",      category: "Data & Infra", scrapeType: "greenhouse", boardId: "gitlab" },
+  { name: "PagerDuty",   slug: "pagerduty",   category: "Data & Infra", scrapeType: "greenhouse", boardId: "pagerduty" },
+  { name: "Vercel",      slug: "vercel",      category: "Data & Infra", scrapeType: "lever",      companyId: "vercel" },
+  { name: "Retool",      slug: "retool",      category: "Data & Infra", scrapeType: "greenhouse", boardId: "retool" },
+  { name: "Airbyte",     slug: "airbyte",     category: "Data & Infra", scrapeType: "greenhouse", boardId: "airbyte" },
 ];
 
 // ─── ML/AI Relevance ──────────────────────────────────────────────────────────
