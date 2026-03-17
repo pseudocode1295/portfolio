@@ -4,61 +4,199 @@ import { callClaude } from "@/lib/claude";
 import { notify } from "@/lib/whatsapp";
 import type { AgentResult, ScrapedJob } from "./types";
 
-// ─── LinkedIn job alert email parser ─────────────────────────────────────────
+// ─── Job alert email detection ────────────────────────────────────────────────
 
 function isLinkedInJobAlert(from: string, subject: string): boolean {
-  return (
-    from.toLowerCase().includes("linkedin") ||
-    from.toLowerCase().includes("jobs-noreply@linkedin.com") ||
-    subject.toLowerCase().includes("jobs you may be interested in") ||
-    subject.toLowerCase().includes("new jobs for you") ||
-    subject.toLowerCase().includes("job alert") ||
-    subject.toLowerCase().includes("recommended jobs")
-  );
+  const f = from.toLowerCase();
+  const s = subject.toLowerCase();
+  return f.includes("linkedin") || s.includes("job alert") ||
+    s.includes("jobs you may") || s.includes("new jobs for you") ||
+    s.includes("recommended jobs") || s.includes("new jobs matching");
 }
 
-async function parseLinkedInJobAlertEmail(body: string, htmlBody: string): Promise<ScrapedJob[]> {
+function isNaukriAlert(from: string, subject: string): boolean {
+  const f = from.toLowerCase();
+  const s = subject.toLowerCase();
+  return f.includes("naukri") ||
+    (s.includes("hiring") && f.includes("naukri")) ||
+    s.includes("jobs for you from") ||
+    (s.includes("is hiring") && f.includes("naukri"));
+}
+
+// ─── Strip HTML to plain text ─────────────────────────────────────────────────
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/div>/gi, "\n")
+    .replace(/<\/tr>/gi, "\n")
+    .replace(/<\/td>/gi, " · ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ").replace(/&#\d+;/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// ─── LinkedIn email parser ────────────────────────────────────────────────────
+
+function parseLinkedInJobAlertEmail(body: string, htmlBody: string): ScrapedJob[] {
   const jobs: ScrapedJob[] = [];
   const content = htmlBody || body;
+  const plain = htmlToText(content);
 
-  // Extract job URLs — LinkedIn job links look like:
-  // https://www.linkedin.com/jobs/view/1234567890
-  const jobUrlPattern = /https?:\/\/www\.linkedin\.com\/jobs\/view\/(\d+)[^\s"<]*/g;
-  const titlePattern = /(?:title|position)[:\s"]+([^"<\n]+)/gi;
+  // LinkedIn job URLs (comm/ tracking links redirect to jobs/view/)
+  const urlPattern = /https?:\/\/(?:www\.)?linkedin\.com\/comm\/jobs\/view\/(\d+)[^\s"<]*/g;
+  const urlPattern2 = /https?:\/\/(?:www\.)?linkedin\.com\/jobs\/view\/(\d+)[^\s"<]*/g;
 
-  const urlMatches = [...content.matchAll(jobUrlPattern)];
-  const uniqueUrls = [...new Set(urlMatches.map(m => m[0].split("?")[0]))];
+  const rawUrls = [
+    ...[...content.matchAll(urlPattern)].map(m => ({ url: m[0], id: m[1] })),
+    ...[...content.matchAll(urlPattern2)].map(m => ({ url: m[0], id: m[1] })),
+  ];
 
-  // Try to extract job cards — LinkedIn emails contain structured job info
-  // Pattern: title followed by company and location in close proximity
-  const jobCardPattern =
-    /([A-Z][^\n<"]{5,80})\s*(?:<[^>]+>|\s)*([A-Z][^\n<"]{2,60})\s*(?:<[^>]+>|\s)*([A-Z][^\n<"]{2,40}(?:India|Remote|Bangalore|Mumbai|Delhi|Hyderabad|Pune|Chennai|Gurugram|Noida)[^\n<"]{0,30})/gi;
+  // Deduplicate by job ID
+  const seen = new Map<string, string>();
+  for (const { url, id } of rawUrls) {
+    if (!seen.has(id)) seen.set(id, url.split("?")[0]);
+  }
 
-  const cardMatches = [...content.matchAll(jobCardPattern)];
+  // For each job ID, find title/company/location in plain text near the URL position
+  // LinkedIn email plain text structure (per job card):
+  //   Job Title\nCompany · Location (On-site/Hybrid/Remote)\n...
+  const lines = plain.split("\n").map(l => l.trim()).filter(Boolean);
 
-  uniqueUrls.forEach((url, i) => {
-    const card = cardMatches[i];
-    const jobId = url.match(/\/view\/(\d+)/)?.[1] || null;
+  const INDIA_CITIES = /bangalore|mumbai|delhi|hyderabad|pune|chennai|gurugram|noida|kolkata|india|remote/i;
+
+  seen.forEach((cleanUrl, jobId) => {
+    // Find the line index where this job ID appears
+    const idLineIdx = lines.findIndex(l => l.includes(jobId));
+    // Scan nearby lines for title/company/location pattern
+    let title = "", company = "", location = "India";
+
+    // Search a window of lines around the job ID
+    const window = lines.slice(Math.max(0, idLineIdx - 8), idLineIdx + 8);
+    for (let i = 0; i < window.length; i++) {
+      const line = window[i];
+      // Title: sentence-case, 5-80 chars, not a URL, not a button label
+      if (!title && line.length > 5 && line.length < 80 &&
+          !line.startsWith("http") && !/^(view|apply|see all|easy apply|promoted|actively)/i.test(line) &&
+          /[A-Z]/.test(line[0])) {
+        title = line;
+      }
+      // Company · Location pattern
+      if (line.includes(" · ") || INDIA_CITIES.test(line)) {
+        const parts = line.split(" · ");
+        if (!company && parts[0] && parts[0].length < 60) company = parts[0].trim();
+        if (!location && parts[1]) location = parts[1].trim();
+        else if (INDIA_CITIES.test(line) && !location) location = line.trim().slice(0, 60);
+      }
+    }
+
+    if (!title) title = "ML/AI Engineer";
+    if (!company) company = "Unknown";
 
     jobs.push({
-      title: card?.[1]?.trim() || "ML Engineer",
-      company: card?.[2]?.trim() || "Unknown",
-      location: card?.[3]?.trim() || "India",
-      jobUrl: url,
+      title,
+      company,
+      location,
+      jobUrl: cleanUrl,
       source: "linkedin_email",
-      description: `Found via LinkedIn job alert email`,
+      description: `LinkedIn job alert — ${company} · ${location}`,
       requiredSkills: [],
-      jobIdExternal: jobId ?? undefined,
+      jobIdExternal: jobId,
     });
   });
 
   return jobs;
 }
 
-async function saveLinkedInJobs(jobs: ScrapedJob[]): Promise<number> {
+// ─── Naukri email parser ──────────────────────────────────────────────────────
+
+function parseNaukriEmail(body: string, htmlBody: string, subject: string): ScrapedJob[] {
+  const jobs: ScrapedJob[] = [];
+  const content = htmlBody || body;
+  const plain = htmlToText(content);
+
+  // Naukri job URLs
+  const urlPattern = /https?:\/\/(?:www\.)?naukri\.com\/job-listings[^\s"<>]*/g;
+  const trackPattern = /https?:\/\/[^\s"<>]*naukri\.com[^\s"<>]*(?:jobid|job_id|jobId)=([^\s"<>&]+)/gi;
+
+  const urls = new Set<string>();
+  for (const m of content.matchAll(urlPattern)) urls.add(m[0].split("?")[0]);
+  for (const m of content.matchAll(trackPattern)) urls.add(m[0].split("&utm")[0]);
+
+  // "X is hiring" pattern from subject
+  const hiringMatch = subject.match(/^([^i]+?)\s+is hiring/i);
+  const hiringCompany = hiringMatch?.[1]?.trim() || null;
+
+  // "Jobs for you from A, B, C" — extract companies from subject
+  const companiesMatch = subject.match(/jobs? for you from (.+)/i);
+  const subjectCompanies = companiesMatch?.[1]
+    ?.split(/[,·]/)
+    .map(c => c.trim())
+    .filter(c => c.length > 1 && c.length < 60) || [];
+
+  // Parse plain text for job cards
+  // Naukri email structure per card: Title\nCompany\nLocation\nSalary\nExperience
+  const lines = plain.split("\n").map(l => l.trim()).filter(Boolean);
+  const SALARY = /lpa|lakh|salary|ctc|\d+\s*-\s*\d+/i;
+  const EXP = /yrs?|years?|exp/i;
+  const LOCATION = /bangalore|mumbai|delhi|hyderabad|pune|chennai|gurugram|noida|india|remote/i;
+
+  // Extract structured job blocks from plain text
+  const blocks: Array<{ title: string; company: string; location: string }> = [];
+  for (let i = 0; i < lines.length - 1; i++) {
+    const line = lines[i];
+    if (line.startsWith("http") || line.length < 4 || line.length > 100) continue;
+    if (SALARY.test(line) || EXP.test(line)) continue;
+
+    // Likely a job title if it has capital letters and reasonable length
+    if (/^[A-Z]/.test(line) && line.length > 5 && line.length < 80 &&
+        !/^(view|apply|click|jobs?|hiring|dear|hi |hello|unsubscribe|naukri)/i.test(line)) {
+      const nextLines = lines.slice(i + 1, i + 5);
+      const companyLine = nextLines.find(l => !LOCATION.test(l) && !SALARY.test(l) && !EXP.test(l) && l.length > 2 && l.length < 60);
+      const locationLine = nextLines.find(l => LOCATION.test(l));
+      blocks.push({
+        title: line,
+        company: companyLine || hiringCompany || (subjectCompanies[blocks.length] ?? "Unknown"),
+        location: locationLine?.slice(0, 60) || "India",
+      });
+    }
+  }
+
+  // Match blocks to URLs
+  const urlArr = [...urls];
+  const count = Math.max(urlArr.length, blocks.length, hiringCompany ? 1 : 0);
+
+  for (let i = 0; i < count; i++) {
+    const block = blocks[i] || { title: "ML/AI Engineer", company: hiringCompany || subjectCompanies[i] || "Unknown", location: "India" };
+    const jobUrl = urlArr[i] || `https://www.naukri.com/job-listings-${block.company.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}-${i}`;
+    if (!urlArr[i]) continue; // skip if no real URL
+
+    jobs.push({
+      title: block.title,
+      company: block.company,
+      location: block.location,
+      jobUrl,
+      source: "naukri_email",
+      description: `Naukri job alert — ${block.company}`,
+      requiredSkills: [],
+    });
+  }
+
+  return jobs;
+}
+
+// ─── Save email-sourced jobs ──────────────────────────────────────────────────
+
+async function saveEmailJobs(jobs: ScrapedJob[], relevanceScore: number): Promise<number> {
   let saved = 0;
   for (const job of jobs) {
-    if (!job.jobUrl) continue;
+    if (!job.jobUrl || !job.title) continue;
     const { error } = await supabase.from("jobs").upsert(
       {
         title: job.title,
@@ -71,15 +209,20 @@ async function saveLinkedInJobs(jobs: ScrapedJob[]): Promise<number> {
         source: job.source,
         description: job.description,
         required_skills: [],
-        job_id_external: job.jobIdExternal,
+        job_id_external: job.jobIdExternal ?? null,
         status: "discovered",
-        relevance_score: 0.75, // LinkedIn recommended = high relevance
+        relevance_score: relevanceScore,
       },
       { onConflict: "job_url", ignoreDuplicates: true }
     );
     if (!error) saved++;
   }
   return saved;
+}
+
+// Keep old name as alias
+async function saveLinkedInJobs(jobs: ScrapedJob[]): Promise<number> {
+  return saveEmailJobs(jobs, 0.75);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,27 +350,31 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
         }
       }
 
-      // ── LinkedIn job alert: extract and save jobs directly ──────────────
+      // ── LinkedIn job alert ───────────────────────────────────────────────
       if (isLinkedInJobAlert(from, subject)) {
-        const linkedInJobs = await parseLinkedInJobAlertEmail(body, htmlBody);
-        if (linkedInJobs.length > 0) {
-          const savedCount = await saveLinkedInJobs(linkedInJobs);
-          if (savedCount > 0) {
-            await notify.newJobs(savedCount, linkedInJobs.slice(0, 3).map(j => `${j.title} @ ${j.company}`));
-          }
-        }
-        // Mark as processed in emails table but skip reply drafting
+        const extracted = parseLinkedInJobAlertEmail(body, htmlBody);
+        const savedCount = extracted.length > 0 ? await saveLinkedInJobs(extracted) : 0;
+        if (savedCount > 0) await notify.newJobs(savedCount, extracted.slice(0, 3).map(j => `${j.title} @ ${j.company}`));
         await supabase.from("emails").insert({
-          job_id: null,
-          gmail_message_id: msg.id,
-          from_email: from,
-          subject,
-          body: `[LinkedIn job alert — ${linkedInJobs.length} jobs extracted]`,
-          received_at: new Date(dateStr).toISOString(),
-          category: "other",
-          reply_draft: null,
-          reply_status: "not_needed",
-        }).select().single();
+          job_id: null, gmail_message_id: msg.id, from_email: from, subject,
+          body: `[LinkedIn job alert — ${extracted.length} jobs extracted, ${savedCount} saved]`,
+          received_at: new Date(dateStr).toISOString(), category: "other",
+          reply_draft: null, reply_status: "not_needed",
+        });
+        continue;
+      }
+
+      // ── Naukri job alert ─────────────────────────────────────────────────
+      if (isNaukriAlert(from, subject)) {
+        const extracted = parseNaukriEmail(body, htmlBody, subject);
+        const savedCount = extracted.length > 0 ? await saveEmailJobs(extracted, 0.65) : 0;
+        if (savedCount > 0) await notify.newJobs(savedCount, extracted.slice(0, 3).map(j => `${j.title} @ ${j.company}`));
+        await supabase.from("emails").insert({
+          job_id: null, gmail_message_id: msg.id, from_email: from, subject,
+          body: `[Naukri alert — ${extracted.length} jobs extracted, ${savedCount} saved]`,
+          received_at: new Date(dateStr).toISOString(), category: "other",
+          reply_draft: null, reply_status: "not_needed",
+        });
         continue;
       }
 
@@ -310,10 +457,123 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
       duration_ms: Date.now() - startTime,
     }).eq("id", logEntry?.id);
 
-    return { success: true, summary: `Processed ${messages.length} emails`, actionsTaken };
+    return { success: true, summary: `Processed ${messages.length} emails, ${actionsTaken} need replies`, actionsTaken };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     await supabase.from("agent_logs").update({ status: "failed", error_message: msg, duration_ms: Date.now() - startTime }).eq("id", logEntry?.id);
     return { success: false, summary: "Email monitor failed", error: msg };
+  }
+}
+
+// ─── Dedicated job email scraper (scans historical inbox) ────────────────────
+// Searches all LinkedIn + Naukri job alert emails regardless of age,
+// skips already-processed ones, saves jobs to DB.
+
+export async function runJobEmailScraperAgent(daysBack = 30): Promise<AgentResult> {
+  const startTime = Date.now();
+  let totalSaved = 0;
+  let totalEmails = 0;
+
+  const { data: logEntry } = await supabase
+    .from("agent_logs")
+    .insert({ agent_name: "job_email_scraper", status: "running", summary: "Scanning job alert emails..." })
+    .select().single();
+
+  try {
+    const gmail = getGmailClient();
+    const since = Math.floor((Date.now() - daysBack * 24 * 60 * 60 * 1000) / 1000);
+
+    // Fetch all LinkedIn + Naukri job alert emails
+    const { data: listData } = await gmail.users.messages.list({
+      userId: "me",
+      q: `after:${since} (from:jobs-noreply@linkedin.com OR from:noreply@linkedin.com OR from:jobalerts-noreply@linkedin.com OR from:donotreply@naukri.com OR from:no-reply@naukri.com OR (subject:"job alert" from:linkedin) OR (subject:"is hiring" from:naukri) OR subject:"jobs for you from")`,
+      maxResults: 200,
+    });
+
+    const messages = listData.messages || [];
+
+    for (const msg of messages) {
+      // Skip already processed
+      const { data: existing } = await supabase
+        .from("emails").select("id").eq("gmail_message_id", msg.id).single();
+      if (existing) continue;
+
+      const { data: fullMsg } = await gmail.users.messages.get({
+        userId: "me", id: msg.id!, format: "full",
+      });
+
+      const headers = fullMsg.payload?.headers || [];
+      const subject = headers.find(h => h.name === "Subject")?.value || "";
+      const from = headers.find(h => h.name === "From")?.value || "";
+      const dateStr = headers.find(h => h.name === "Date")?.value || new Date().toISOString();
+
+      // Decode body parts (handle nested multipart)
+      let body = "", htmlBody = "";
+      type MsgPart = NonNullable<typeof fullMsg.payload>;
+      const extractParts = (parts: MsgPart[]) => {
+        for (const part of parts) {
+          if (part?.mimeType === "text/plain" && part.body?.data && !body)
+            body = Buffer.from(part.body.data, "base64").toString("utf-8");
+          if (part?.mimeType === "text/html" && part.body?.data && !htmlBody)
+            htmlBody = Buffer.from(part.body.data, "base64").toString("utf-8");
+          if (part?.parts) extractParts(part.parts as MsgPart[]);
+        }
+      };
+      const rootParts = (fullMsg.payload?.parts ?? (fullMsg.payload ? [fullMsg.payload] : [])) as MsgPart[];
+      extractParts(rootParts);
+      if (!body && !htmlBody && fullMsg.payload?.body?.data)
+        htmlBody = Buffer.from(fullMsg.payload.body.data, "base64").toString("utf-8");
+
+      let extracted: ScrapedJob[] = [];
+      let savedCount = 0;
+      let source = "email";
+
+      if (isLinkedInJobAlert(from, subject)) {
+        extracted = parseLinkedInJobAlertEmail(body, htmlBody);
+        savedCount = extracted.length > 0 ? await saveLinkedInJobs(extracted) : 0;
+        source = "linkedin_email";
+      } else if (isNaukriAlert(from, subject)) {
+        extracted = parseNaukriEmail(body, htmlBody, subject);
+        savedCount = extracted.length > 0 ? await saveEmailJobs(extracted, 0.65) : 0;
+        source = "naukri_email";
+      } else {
+        continue; // not a job alert
+      }
+
+      totalSaved += savedCount;
+      totalEmails++;
+
+      await supabase.from("emails").insert({
+        job_id: null, gmail_message_id: msg.id, from_email: from, subject,
+        body: `[${source} — ${extracted.length} extracted, ${savedCount} saved]`,
+        received_at: new Date(dateStr).toISOString(), category: "other",
+        reply_draft: null, reply_status: "not_needed",
+      });
+
+      // Update progress in log
+      if (logEntry?.id) {
+        await supabase.from("agent_logs").update({
+          summary: `Scanned ${totalEmails} job alert emails, saved ${totalSaved} jobs so far...`,
+          jobs_found: totalSaved,
+        }).eq("id", logEntry.id);
+      }
+    }
+
+    if (totalSaved > 0) await notify.newJobs(totalSaved, [`${totalSaved} jobs from email alerts`]);
+
+    const summary = `Scanned ${totalEmails} job alert emails (${daysBack}d), saved ${totalSaved} jobs`;
+    await supabase.from("agent_logs").update({
+      status: "completed", summary,
+      jobs_found: totalSaved, actions_taken: totalSaved,
+      duration_ms: Date.now() - startTime,
+    }).eq("id", logEntry?.id);
+
+    return { success: true, summary, jobsFound: totalSaved, actionsTaken: totalSaved };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    await supabase.from("agent_logs").update({
+      status: "failed", error_message: msg, duration_ms: Date.now() - startTime,
+    }).eq("id", logEntry?.id);
+    return { success: false, summary: "Job email scraper failed", error: msg };
   }
 }

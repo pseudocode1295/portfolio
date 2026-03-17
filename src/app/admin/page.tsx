@@ -234,6 +234,7 @@ export default function AdminDashboard() {
         {[
           { key: "job_discovery", label: "🔍 Run Job Discovery" },
           { key: "email_monitor", label: "📧 Check Emails" },
+          { key: "job_email_scraper", label: "📨 Scrape Job Alert Emails (30d)" },
         ].map((a) => (
           <button
             key={a.key}
