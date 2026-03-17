@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 type JobStatus = "discovered" | "linkedin_pending" | "referral_pending" | "applied" | "responded" | "interview";
@@ -42,6 +42,31 @@ interface InterviewPrep {
   jobs: { title: string; company: string };
 }
 
+interface FeedProgress {
+  label: string;
+  source: string;
+  status: "pending" | "running" | "done" | "skipped";
+  found: number;
+  saved: number;
+}
+
+interface DiscoveryProgress {
+  totalFeeds: number;
+  completedFeeds: number;
+  currentFeed: string;
+  totalFound: number;
+  totalSaved: number;
+  cancelled: boolean;
+  feeds: FeedProgress[];
+}
+
+interface JobProgressData {
+  running: boolean;
+  status?: string;
+  logId?: string;
+  progress?: DiscoveryProgress;
+}
+
 interface DashboardData {
   overview: { totalJobs: number; pendingApprovals: number; appliedJobs: number; interviewJobs: number; statusCounts: Record<string, number> };
   jobs: Job[];
@@ -75,6 +100,9 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<"pipeline" | "approvals" | "interview" | "logs">("pipeline");
   const [approvalEdit, setApprovalEdit] = useState<Record<string, string>>({});
   const [triggering, setTriggering] = useState<string | null>(null);
+  const [jobProgress, setJobProgress] = useState<JobProgressData | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(async () => {
     const res = await fetch("/api/admin/stats");
@@ -85,6 +113,40 @@ export default function AdminDashboard() {
   }, [router]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const startProgressPolling = useCallback(() => {
+    if (pollRef.current) return;
+    pollRef.current = setInterval(async () => {
+      const res = await fetch("/api/admin/job-progress");
+      const data: JobProgressData = await res.json();
+      setJobProgress(data);
+      if (!data.running) {
+        clearInterval(pollRef.current!);
+        pollRef.current = null;
+        setTriggering(null);
+        setCancelling(false);
+        fetchData();
+      }
+    }, 2000);
+  }, [fetchData]);
+
+  async function cancelJobDiscovery() {
+    setCancelling(true);
+    await fetch("/api/admin/job-progress", { method: "DELETE" });
+  }
+
+  // On mount, check if discovery is already running
+  useEffect(() => {
+    fetch("/api/admin/job-progress")
+      .then(r => r.json())
+      .then((data: JobProgressData) => {
+        if (data.running) {
+          setJobProgress(data);
+          setTriggering("job_discovery");
+          startProgressPolling();
+        }
+      });
+  }, [startProgressPolling]);
 
   async function handleApproval(id: string, decision: "approved" | "rejected" | "edited") {
     await fetch("/api/admin/approve", {
@@ -97,13 +159,29 @@ export default function AdminDashboard() {
 
   async function triggerAgent(agent: string) {
     setTriggering(agent);
-    await fetch("/api/admin/trigger", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agent }),
-    });
-    setTriggering(null);
-    fetchData();
+    if (agent === "job_discovery") {
+      setJobProgress(null);
+      startProgressPolling();
+      // Fire and forget — progress is tracked via polling
+      fetch("/api/admin/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent }),
+      }).then(() => {
+        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        setTriggering(null);
+        setCancelling(false);
+        fetchData();
+      });
+    } else {
+      await fetch("/api/admin/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent }),
+      });
+      setTriggering(null);
+      fetchData();
+    }
   }
 
   async function logout() {
@@ -167,6 +245,78 @@ export default function AdminDashboard() {
           </button>
         ))}
       </div>
+
+      {/* Job Discovery Progress Panel */}
+      {triggering === "job_discovery" && (
+        <div className="mx-6 mb-4 bg-gray-900 border border-blue-800 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+              <span className="font-semibold text-blue-300">Job Discovery Running</span>
+              {jobProgress?.progress && (
+                <span className="text-sm text-gray-400">
+                  {jobProgress.progress.completedFeeds}/{jobProgress.progress.totalFeeds} feeds
+                  · {jobProgress.progress.totalFound} found
+                  · {jobProgress.progress.totalSaved} saved
+                </span>
+              )}
+            </div>
+            <button
+              onClick={cancelJobDiscovery}
+              disabled={cancelling}
+              className="text-sm text-red-400 hover:text-red-300 border border-red-800 px-3 py-1 rounded-lg disabled:opacity-50 transition"
+            >
+              {cancelling ? "Cancelling..." : "✕ Cancel"}
+            </button>
+          </div>
+
+          {/* Overall progress bar */}
+          {jobProgress?.progress && (
+            <div className="mb-3">
+              <div className="flex justify-between text-xs text-gray-500 mb-1">
+                <span>{jobProgress.progress.currentFeed}</span>
+                <span>{Math.round((jobProgress.progress.completedFeeds / jobProgress.progress.totalFeeds) * 100)}%</span>
+              </div>
+              <div className="w-full bg-gray-800 rounded-full h-2">
+                <div
+                  className="bg-blue-500 h-2 rounded-full transition-all duration-500"
+                  style={{ width: `${Math.round((jobProgress.progress.completedFeeds / jobProgress.progress.totalFeeds) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Per-feed breakdown */}
+          {jobProgress?.progress?.feeds && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-1 max-h-64 overflow-y-auto">
+              {jobProgress.progress.feeds.map((feed, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs py-1 px-2 rounded-lg bg-gray-800">
+                  <span className="flex-shrink-0 w-4 text-center">
+                    {feed.status === "done" ? "✓" :
+                     feed.status === "running" ? <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse" /> :
+                     feed.status === "skipped" ? "–" : "·"}
+                  </span>
+                  <span className={`flex-1 truncate ${
+                    feed.status === "done" ? "text-gray-300" :
+                    feed.status === "running" ? "text-blue-300 font-medium" :
+                    feed.status === "skipped" ? "text-gray-600 line-through" :
+                    "text-gray-500"
+                  }`}>{feed.label}</span>
+                  {feed.status === "done" && (
+                    <span className="flex-shrink-0 text-gray-500">
+                      {feed.found > 0 ? <span className="text-green-400">{feed.saved} saved</span> : "0"}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!jobProgress?.progress && (
+            <p className="text-sm text-gray-500 animate-pulse">Initialising...</p>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="px-6 border-b border-gray-800 flex gap-1">
