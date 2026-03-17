@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { anthropic, AJAY_PROFILE } from "@/lib/claude";
+
 import { notify } from "@/lib/whatsapp";
 import type { AgentResult, ScrapedJob } from "./types";
 
@@ -14,109 +14,124 @@ const TARGET_ROLES = [
   "LLM Engineer",
 ];
 
-// Use Claude with web search to find jobs and return structured data
-async function searchJobsWithWebSearch(): Promise<ScrapedJob[]> {
-  const searchQueries = [
-    "site:linkedin.com/jobs ML Engineer GenAI India 2024 2025",
-    "site:naukri.com senior ML engineer LLM India",
-    "site:indeed.com AI platform engineer India senior",
-  ];
-
-  const systemPrompt = `You are a job search agent for Ajay Kumar.
-
-${AJAY_PROFILE}
-
-Search for current job openings matching this profile. Use the web_search tool to find REAL job listings.
-For each search, extract actual job postings with real URLs.
-Target roles: ${TARGET_ROLES.join(", ")}
-Requirements: India location, 45+ LPA, Senior/Lead level.
-
-After searching, return ONLY a valid JSON array (no markdown) like:
-[
+// Free RSS/API job sources — no API key, no cost
+const FREE_JOB_FEEDS = [
   {
-    "title": "Senior ML Engineer",
-    "company": "Microsoft",
-    "location": "Hyderabad, India",
-    "salaryMin": 45,
-    "salaryMax": 70,
-    "salaryCurrency": "INR",
-    "jobUrl": "https://...",
-    "source": "linkedin",
-    "description": "Brief description...",
-    "requiredSkills": ["Python", "LLMs", "Azure"],
-    "jobIdExternal": "12345"
-  }
-]`;
+    source: "indeed",
+    url: "https://in.indeed.com/rss?q=Senior+ML+Engineer+GenAI&l=India&sort=date",
+  },
+  {
+    source: "indeed",
+    url: "https://in.indeed.com/rss?q=LLM+Engineer+AI+Platform&l=India&sort=date",
+  },
+  {
+    source: "indeed",
+    url: "https://in.indeed.com/rss?q=Machine+Learning+Engineer+45LPA&l=India&sort=date",
+  },
+];
 
-  const messages: { role: "user" | "assistant"; content: string }[] = [
-    {
-      role: "user",
-      content: `Search for current job openings using these queries:\n${searchQueries.join("\n")}\n\nAlso search: "ML Engineer GenAI India 45LPA 2025" and "Senior AI Engineer India remote"\n\nReturn all relevant jobs as a JSON array.`,
-    },
-  ];
+// Parse Indeed RSS XML into ScrapedJob objects
+function parseIndeedRSS(xml: string, source: string): ScrapedJob[] {
+  const jobs: ScrapedJob[] = [];
 
-  try {
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 8192,
-      system: systemPrompt,
-      tools: [{ type: "web_search_20260209" as const, name: "web_search" }],
-      messages,
+  // Extract <item> blocks
+  const items = xml.match(/<item>([\s\S]*?)<\/item>/g) || [];
+
+  for (const item of items) {
+    const title = item.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/)?.[1]
+      || item.match(/<title>(.*?)<\/title>/)?.[1] || "";
+    const link = item.match(/<link>(.*?)<\/link>/)?.[1]
+      || item.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1] || "";
+    const description = item.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/)?.[1]
+      || item.match(/<description>(.*?)<\/description>/)?.[1] || "";
+    const company = item.match(/<source[^>]*>(.*?)<\/source>/)?.[1]
+      || description.match(/company[:\s]+([^<\n,]+)/i)?.[1] || "Unknown";
+    const location = item.match(/<location>(.*?)<\/location>/)?.[1]
+      || description.match(/location[:\s]+([^<\n,]+)/i)?.[1] || "India";
+
+    if (!title || !link) continue;
+
+    // Strip HTML tags from description
+    const cleanDesc = description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 400);
+
+    // Extract skills from description
+    const skillKeywords = ["Python", "TensorFlow", "PyTorch", "LangChain", "Azure", "AWS",
+      "MLflow", "Spark", "Docker", "Kubernetes", "RAG", "LLM", "GenAI", "SQL", "Scala"];
+    const requiredSkills = skillKeywords.filter(s =>
+      cleanDesc.toLowerCase().includes(s.toLowerCase())
+    );
+
+    jobs.push({
+      title: title.trim(),
+      company: company.trim(),
+      location: location.trim(),
+      salaryMin: null,
+      salaryMax: null,
+      salaryCurrency: "INR",
+      jobUrl: link.trim(),
+      source,
+      description: cleanDesc,
+      requiredSkills,
+      jobIdExternal: link.match(/jk=([a-z0-9]+)/i)?.[1] || null,
     });
-
-    // Extract final text from response
-    let finalText = "";
-    for (const block of response.content) {
-      if (block.type === "text") {
-        finalText = block.text;
-      }
-    }
-
-    if (!finalText) return [];
-
-    const cleaned = finalText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    // Find JSON array in response
-    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) return [];
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    return Array.isArray(parsed) ? parsed.map((j: ScrapedJob) => ({ ...j, source: j.source || "web_search" })) : [];
-  } catch (err) {
-    console.error("Web search job discovery error:", err);
-    return [];
   }
+
+  return jobs;
 }
 
-// Score job relevance (simple heuristic, no extra API call)
+// Score job relevance — pure heuristic, zero API cost
 function scoreJobRelevance(job: ScrapedJob): number {
-  let score = 0.5;
+  let score = 0.4;
   const titleLower = (job.title || "").toLowerCase();
   const descLower = (job.description || "").toLowerCase();
 
-  // Role match
-  const roleKeywords = ["ml", "machine learning", "genai", "llm", "ai platform", "applied scientist", "ai engineer"];
-  if (roleKeywords.some(k => titleLower.includes(k))) score += 0.2;
+  // Role match in title
+  const roleKeywords = ["ml", "machine learning", "genai", "llm", "ai platform",
+    "applied scientist", "ai engineer", "deep learning", "nlp", "data science"];
+  if (roleKeywords.some(k => titleLower.includes(k))) score += 0.25;
 
   // Seniority
-  if (titleLower.includes("senior") || titleLower.includes("lead") || titleLower.includes("principal")) score += 0.1;
+  if (titleLower.includes("senior") || titleLower.includes("lead") ||
+      titleLower.includes("principal") || titleLower.includes("staff")) score += 0.1;
+
+  // Irrelevant roles
+  if (titleLower.includes("intern") || titleLower.includes("junior") ||
+      titleLower.includes("fresher") || titleLower.includes("analyst")) score -= 0.2;
 
   // Skills in description
-  const skills = ["python", "llm", "langchain", "azure", "mlflow", "rag", "transformer"];
+  const skills = ["python", "llm", "langchain", "azure", "mlflow", "rag",
+    "transformer", "pytorch", "tensorflow", "generative ai", "openai"];
   const skillMatches = skills.filter(s => descLower.includes(s)).length;
   score += Math.min(skillMatches * 0.05, 0.2);
 
-  // Salary filter
-  if (job.salaryMin && job.salaryMin < 45) score -= 0.3;
+  // Salary filter — reject if explicitly too low
+  if (job.salaryMin && job.salaryMin < 30) score -= 0.3;
 
   return Math.min(1, Math.max(0, score));
+}
+
+// Fetch jobs from a free RSS feed
+async function fetchFeedJobs(feedUrl: string, source: string): Promise<ScrapedJob[]> {
+  try {
+    const res = await fetch(feedUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; JobBot/1.0)" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const xml = await res.text();
+    return parseIndeedRSS(xml, source);
+  } catch {
+    return [];
+  }
 }
 
 // Save jobs to database (skip duplicates)
 async function saveJobs(jobs: ScrapedJob[]): Promise<number> {
   let saved = 0;
   for (const job of jobs) {
+    if (!job.jobUrl || !job.title) continue;
     const relevanceScore = scoreJobRelevance(job);
-    if (relevanceScore < 0.4) continue; // skip irrelevant jobs
+    if (relevanceScore < 0.4) continue;
 
     const { error } = await supabase.from("jobs").upsert(
       {
@@ -141,7 +156,7 @@ async function saveJobs(jobs: ScrapedJob[]): Promise<number> {
   return saved;
 }
 
-// Main job discovery agent
+// Main job discovery agent — uses free RSS feeds, zero AI API cost
 export async function runJobDiscoveryAgent(): Promise<AgentResult> {
   const startTime = Date.now();
   let totalSaved = 0;
@@ -154,33 +169,51 @@ export async function runJobDiscoveryAgent(): Promise<AgentResult> {
     .single();
 
   try {
-    // Use Claude with web_search tool to find real job listings
-    const jobs = await searchJobsWithWebSearch();
-    totalSaved = await saveJobs(jobs);
+    // Fetch from all free RSS feeds in parallel
+    const feedResults = await Promise.all(
+      FREE_JOB_FEEDS.map(f => fetchFeedJobs(f.url, f.source))
+    );
+    const allJobs = feedResults.flat();
 
-    // Collect new companies for notification
-    jobs.slice(0, 5).forEach(j => {
-      if (j.company && !newCompanies.includes(j.company)) {
-        newCompanies.push(`${j.title} @ ${j.company}`);
-      }
+    // Deduplicate by URL
+    const seen = new Set<string>();
+    const uniqueJobs = allJobs.filter(j => {
+      if (!j.jobUrl || seen.has(j.jobUrl)) return false;
+      seen.add(j.jobUrl);
+      return true;
     });
 
-    // Send WhatsApp notification if new jobs found
+    totalSaved = await saveJobs(uniqueJobs);
+
+    // Collect top companies for notification
+    uniqueJobs
+      .filter(j => scoreJobRelevance(j) >= 0.4)
+      .slice(0, 5)
+      .forEach(j => {
+        if (j.company && !newCompanies.includes(j.company)) {
+          newCompanies.push(`${j.title} @ ${j.company}`);
+        }
+      });
+
+    // WhatsApp notification if new jobs found
     if (totalSaved > 0) {
       await notify.newJobs(totalSaved, newCompanies);
-      await notify.approvalNeeded("connection request", totalSaved);
     }
 
-    // Update log
     await supabase.from("agent_logs").update({
       status: "completed",
-      summary: `Found and saved ${totalSaved} new relevant jobs`,
+      summary: `Scanned ${uniqueJobs.length} jobs, saved ${totalSaved} relevant`,
       jobs_found: totalSaved,
       actions_taken: totalSaved,
       duration_ms: Date.now() - startTime,
     }).eq("id", logEntry?.id);
 
-    return { success: true, summary: `Discovered ${totalSaved} new jobs`, jobsFound: totalSaved, actionsTaken: totalSaved };
+    return {
+      success: true,
+      summary: `Discovered ${totalSaved} new jobs (scanned ${uniqueJobs.length})`,
+      jobsFound: totalSaved,
+      actionsTaken: totalSaved,
+    };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     await supabase.from("agent_logs").update({
