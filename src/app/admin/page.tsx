@@ -177,7 +177,7 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"pipeline" | "approvals" | "interview" | "logs" | "companies">("pipeline");
+  const [activeTab, setActiveTab] = useState<"job_discovery" | "email_alerts" | "companies" | "approvals" | "interview" | "logs">("job_discovery");
   const [approvalEdit, setApprovalEdit] = useState<Record<string, string>>({});
   const [triggering, setTriggering] = useState<string | null>(null);
   const [jobProgress, setJobProgress] = useState<JobProgressData | null>(null);
@@ -676,14 +676,21 @@ export default function AdminDashboard() {
 
       {/* Tabs */}
       <div className="px-6 border-b border-gray-800 flex gap-1">
-        {(["pipeline", "companies", "approvals", "interview", "logs"] as const).map((tab) => (
+        {([
+          { key: "job_discovery", label: "🔍 Job Discovery" },
+          { key: "email_alerts",  label: "📨 Email Alerts" },
+          { key: "companies",     label: "🏢 Companies" },
+          { key: "approvals",     label: "Approvals" },
+          { key: "interview",     label: "Interview" },
+          { key: "logs",          label: "Logs" },
+        ] as const).map((tab) => (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-3 text-sm font-medium capitalize transition border-b-2 ${activeTab === tab ? "border-blue-500 text-white" : "border-transparent text-gray-400 hover:text-white"}`}
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-3 text-sm font-medium transition border-b-2 whitespace-nowrap ${activeTab === tab.key ? "border-blue-500 text-white" : "border-transparent text-gray-400 hover:text-white"}`}
           >
-            {tab}
-            {tab === "approvals" && (data?.pendingApprovals?.length ?? 0) > 0 && (
+            {tab.label}
+            {tab.key === "approvals" && (data?.pendingApprovals?.length ?? 0) > 0 && (
               <span className="ml-2 bg-yellow-600 text-white text-xs px-1.5 py-0.5 rounded-full">{data?.pendingApprovals?.length}</span>
             )}
           </button>
@@ -692,104 +699,109 @@ export default function AdminDashboard() {
 
       <div className="px-6 py-4">
         {/* Pipeline Tab */}
-        {activeTab === "pipeline" && (
-          <div>
-            <h2 className="text-lg font-semibold mb-4">Job Pipeline</h2>
-            {/* Status flow */}
-            <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-              {(Object.keys(STATUS_LABELS) as JobStatus[]).map((s) => (
-                <div key={s} className="flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl p-3 min-w-[130px]">
-                  <div className={`text-xs font-medium px-2 py-1 rounded-full ${STATUS_COLORS[s]} inline-block mb-2`}>{STATUS_LABELS[s]}</div>
-                  <div className="text-2xl font-bold">{overview.statusCounts?.[s] || 0}</div>
-                </div>
-              ))}
-            </div>
-            {/* Split jobs by source */}
-            {(() => {
-              const allJobs = data?.jobs || [];
-              const feedJobs = allJobs.filter(j => !j.source?.endsWith("_email"));
-              const emailJobs = allJobs.filter(j => j.source?.endsWith("_email"));
-
-              const JobCard = ({ job }: { job: Job }) => (
-                <div key={job.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-white">{job.title}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
-                        <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
-                      </div>
-                      <div className="text-sm text-gray-400 mt-0.5">
-                        {job.company}
-                        {job.location && <span> · {job.location}</span>}
-                        <span className="ml-2 text-gray-600 text-xs">{job.source}</span>
-                        <span className="ml-2 text-gray-600 text-xs">{new Date(job.discovered_at).toLocaleDateString()}</span>
-                      </div>
-                      {(job.salary_min || job.salary_max) && (
-                        <div className="text-xs text-green-400 mt-1">
-                          💰 {job.salary_min && `${job.salary_min}`}{job.salary_max && `–${job.salary_max}`} LPA
-                        </div>
-                      )}
-                      {job.required_skills?.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {job.required_skills.slice(0, 8).map((skill) => (
-                            <span key={skill} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{skill}</span>
-                          ))}
-                          {job.required_skills.length > 8 && (
-                            <span className="text-xs text-gray-600">+{job.required_skills.length - 8} more</span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <a href={job.job_url} target="_blank" rel="noopener noreferrer"
-                        className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">
-                        View →
-                      </a>
-                      <button
-                        onClick={() => deleteJob(job.id)}
-                        className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition"
-                        title="Remove from pipeline"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-
-              return (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Column 1: Job Discovery */}
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 mb-3 pb-2 border-b border-blue-900/40">
-                      <h3 className="text-sm font-semibold text-blue-300">🔍 Job Discovery</h3>
-                      <span className="text-xs bg-blue-900/40 text-blue-400 px-2 py-0.5 rounded-full">{feedJobs.length}</span>
-                      <span className="text-xs text-gray-600 truncate">RSS &amp; API feeds</span>
-                    </div>
-                    <div className="space-y-2">
-                      {feedJobs.map(job => <JobCard key={job.id} job={job} />)}
-                      {!feedJobs.length && <p className="text-gray-600 text-sm py-4">No feed jobs yet.</p>}
-                    </div>
-                  </div>
-
-                  {/* Column 2: Email Alerts */}
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 mb-3 pb-2 border-b border-purple-900/40">
-                      <h3 className="text-sm font-semibold text-purple-300">📨 Email Alerts</h3>
-                      <span className="text-xs bg-purple-900/40 text-purple-400 px-2 py-0.5 rounded-full">{emailJobs.length}</span>
-                      <span className="text-xs text-gray-600 truncate">LinkedIn &amp; Naukri emails</span>
-                    </div>
-                    <div className="space-y-2">
-                      {emailJobs.map(job => <JobCard key={job.id} job={job} />)}
-                      {!emailJobs.length && <p className="text-gray-600 text-sm py-4">No email jobs yet.</p>}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
+        {/* Shared status counts bar — shown on both job tabs */}
+        {(activeTab === "job_discovery" || activeTab === "email_alerts") && (
+          <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+            {(Object.keys(STATUS_LABELS) as JobStatus[]).map((s) => (
+              <div key={s} className="flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl p-3 min-w-[130px]">
+                <div className={`text-xs font-medium px-2 py-1 rounded-full ${STATUS_COLORS[s]} inline-block mb-2`}>{STATUS_LABELS[s]}</div>
+                <div className="text-2xl font-bold">{overview.statusCounts?.[s] || 0}</div>
+              </div>
+            ))}
           </div>
         )}
+
+        {/* Job Discovery Tab */}
+        {activeTab === "job_discovery" && (() => {
+          const jobs = (data?.jobs || []).filter(j => !j.source?.endsWith("_email"));
+          const JobCard = ({ job }: { job: Job }) => (
+            <div className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-white">{job.title}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
+                    <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
+                  </div>
+                  <div className="text-sm text-gray-400 mt-0.5">
+                    {job.company}{job.location && <span> · {job.location}</span>}
+                    <span className="ml-2 text-gray-600 text-xs">{job.source}</span>
+                    <span className="ml-2 text-gray-600 text-xs">{new Date(job.discovered_at).toLocaleDateString()}</span>
+                  </div>
+                  {(job.salary_min || job.salary_max) && (
+                    <div className="text-xs text-green-400 mt-1">💰 {job.salary_min}{job.salary_max && `–${job.salary_max}`} LPA</div>
+                  )}
+                  {job.required_skills?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {job.required_skills.slice(0, 8).map(s => (
+                        <span key={s} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{s}</span>
+                      ))}
+                      {job.required_skills.length > 8 && <span className="text-xs text-gray-600">+{job.required_skills.length - 8} more</span>}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <a href={job.job_url} target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">View →</a>
+                  <button onClick={() => deleteJob(job.id)}
+                    className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition" title="Remove">✕</button>
+                </div>
+              </div>
+            </div>
+          );
+          return (
+            <div className="space-y-2">
+              {jobs.map(job => <JobCard key={job.id} job={job} />)}
+              {!jobs.length && <p className="text-gray-500 text-center py-8">No jobs discovered yet. Run <span className="text-blue-400">🔍 Run Job Discovery</span> above.</p>}
+            </div>
+          );
+        })()}
+
+        {/* Email Alerts Tab */}
+        {activeTab === "email_alerts" && (() => {
+          const jobs = (data?.jobs || []).filter(j => j.source?.endsWith("_email"));
+          const JobCard = ({ job }: { job: Job }) => (
+            <div className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-white">{job.title}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
+                    <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
+                  </div>
+                  <div className="text-sm text-gray-400 mt-0.5">
+                    {job.company}{job.location && <span> · {job.location}</span>}
+                    <span className="ml-2 text-gray-600 text-xs">{job.source}</span>
+                    <span className="ml-2 text-gray-600 text-xs">{new Date(job.discovered_at).toLocaleDateString()}</span>
+                  </div>
+                  {(job.salary_min || job.salary_max) && (
+                    <div className="text-xs text-green-400 mt-1">💰 {job.salary_min}{job.salary_max && `–${job.salary_max}`} LPA</div>
+                  )}
+                  {job.required_skills?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {job.required_skills.slice(0, 8).map(s => (
+                        <span key={s} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{s}</span>
+                      ))}
+                      {job.required_skills.length > 8 && <span className="text-xs text-gray-600">+{job.required_skills.length - 8} more</span>}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <a href={job.job_url} target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">View →</a>
+                  <button onClick={() => deleteJob(job.id)}
+                    className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition" title="Remove">✕</button>
+                </div>
+              </div>
+            </div>
+          );
+          return (
+            <div className="space-y-2">
+              {jobs.map(job => <JobCard key={job.id} job={job} />)}
+              {!jobs.length && <p className="text-gray-500 text-center py-8">No email jobs yet. Run <span className="text-purple-400">📨 Scrape Job Alert Emails</span> above.</p>}
+            </div>
+          );
+        })()}
 
         {/* Companies Tab */}
         {activeTab === "companies" && (() => {
