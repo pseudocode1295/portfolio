@@ -102,6 +102,51 @@ interface EmailProgressData {
   progress?: EmailProgress;
 }
 
+interface CompanyResult {
+  name: string;
+  slug: string;
+  category: string;
+  status: "pending" | "running" | "done" | "failed" | "skipped";
+  found: number;
+  saved: number;
+  error?: string;
+}
+
+interface CompanyProgress {
+  totalCompanies: number;
+  completedCompanies: number;
+  currentCompany: string;
+  totalFound: number;
+  totalSaved: number;
+  cancelled: boolean;
+  companies: CompanyResult[];
+}
+
+interface CompanyProgressData {
+  running: boolean;
+  status?: string;
+  logId?: string;
+  progress?: CompanyProgress;
+}
+
+// Source → category lookup for the Companies tab
+const COMPANY_CATEGORY: Record<string, string> = {
+  google: "FAANG", amazon: "FAANG", apple: "FAANG", microsoft: "FAANG", meta: "FAANG", netflix: "FAANG",
+  uber: "Big Tech", airbnb: "Big Tech", adobe: "Big Tech", atlassian: "Big Tech", salesforce: "Big Tech", linkedin: "Big Tech",
+  stripe: "Product", figma: "Product", notion: "Product", canva: "Product", dropbox: "Product",
+  grammarly: "Product", twilio: "Product", zendesk: "Product", rippling: "Product",
+  postman: "Product", browserstack: "Product", intuit: "Product", gong: "Product", twitch: "Product",
+  razorpay: "Indian Unicorn", freshworks: "Indian Unicorn", cred: "Indian Unicorn",
+  meesho: "Indian Unicorn", urbancompany: "Indian Unicorn", groww: "Indian Unicorn",
+  zepto: "Indian Unicorn", phonepe: "Indian Unicorn", swiggy: "Indian Unicorn",
+  paypal: "MNC", walmart: "MNC", cisco: "MNC", workday: "MNC", wayfair: "MNC", segment: "MNC",
+};
+
+function getCompanyCategory(source: string): string {
+  const slug = source.replace("company_", "");
+  return COMPANY_CATEGORY[slug] || "Other";
+}
+
 interface DashboardData {
   overview: { totalJobs: number; pendingApprovals: number; appliedJobs: number; interviewJobs: number; statusCounts: Record<string, number> };
   jobs: Job[];
@@ -132,7 +177,7 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"pipeline" | "approvals" | "interview" | "logs">("pipeline");
+  const [activeTab, setActiveTab] = useState<"pipeline" | "approvals" | "interview" | "logs" | "companies">("pipeline");
   const [approvalEdit, setApprovalEdit] = useState<Record<string, string>>({});
   const [triggering, setTriggering] = useState<string | null>(null);
   const [jobProgress, setJobProgress] = useState<JobProgressData | null>(null);
@@ -141,6 +186,11 @@ export default function AdminDashboard() {
   const [emailProgress, setEmailProgress] = useState<EmailProgressData | null>(null);
   const [emailCancelling, setEmailCancelling] = useState(false);
   const emailPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [companyProgress, setCompanyProgress] = useState<CompanyProgressData | null>(null);
+  const [companyCancelling, setCompanyCancelling] = useState(false);
+  const companyPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [companyJobs, setCompanyJobs] = useState<Job[]>([]);
+  const [companyCategoryFilter, setCompanyCategoryFilter] = useState("All");
 
   const fetchData = useCallback(async () => {
     const res = await fetch("/api/admin/stats");
@@ -194,27 +244,52 @@ export default function AdminDashboard() {
     await fetch("/api/admin/email-progress", { method: "DELETE" });
   }
 
-  // On mount, check if either agent is already running
+  const fetchCompanyJobs = useCallback(async () => {
+    const res = await fetch("/api/admin/company-jobs");
+    const data = await res.json();
+    setCompanyJobs(data.jobs || []);
+  }, []);
+
+  const startCompanyPolling = useCallback(() => {
+    if (companyPollRef.current) return;
+    companyPollRef.current = setInterval(async () => {
+      const res = await fetch("/api/admin/company-scraper");
+      const data: CompanyProgressData = await res.json();
+      setCompanyProgress(data);
+      if (!data.running) {
+        clearInterval(companyPollRef.current!);
+        companyPollRef.current = null;
+        setTriggering(null);
+        setCompanyCancelling(false);
+        fetchCompanyJobs();
+      }
+    }, 2000);
+  }, [fetchCompanyJobs]);
+
+  async function cancelCompanyScraper() {
+    setCompanyCancelling(true);
+    await fetch("/api/admin/company-scraper", { method: "DELETE" });
+  }
+
+  // On mount, check if any agent is already running + load company jobs
   useEffect(() => {
     fetch("/api/admin/job-progress")
       .then(r => r.json())
       .then((data: JobProgressData) => {
-        if (data.running) {
-          setJobProgress(data);
-          setTriggering("job_discovery");
-          startProgressPolling();
-        }
+        if (data.running) { setJobProgress(data); setTriggering("job_discovery"); startProgressPolling(); }
       });
     fetch("/api/admin/email-progress")
       .then(r => r.json())
       .then((data: EmailProgressData) => {
-        if (data.running) {
-          setEmailProgress(data);
-          setTriggering(data.agentName || "email_monitor");
-          startEmailPolling(data.agentName || "email_monitor");
-        }
+        if (data.running) { setEmailProgress(data); setTriggering(data.agentName || "email_monitor"); startEmailPolling(data.agentName || "email_monitor"); }
       });
-  }, [startProgressPolling, startEmailPolling]);
+    fetch("/api/admin/company-scraper")
+      .then(r => r.json())
+      .then((data: CompanyProgressData) => {
+        if (data.running) { setCompanyProgress(data); setTriggering("company_scraper"); startCompanyPolling(); }
+      });
+    fetchCompanyJobs();
+  }, [startProgressPolling, startEmailPolling, startCompanyPolling, fetchCompanyJobs]);
 
   async function handleApproval(id: string, decision: "approved" | "rejected" | "edited") {
     await fetch("/api/admin/approve", {
@@ -239,6 +314,20 @@ export default function AdminDashboard() {
         setTriggering(null);
         setCancelling(false);
         fetchData();
+      });
+    } else if (agent === "company_scraper") {
+      setCompanyProgress(null);
+      setActiveTab("companies");
+      startCompanyPolling();
+      fetch("/api/admin/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent }),
+      }).then(() => {
+        if (companyPollRef.current) { clearInterval(companyPollRef.current); companyPollRef.current = null; }
+        setTriggering(null);
+        setCompanyCancelling(false);
+        fetchCompanyJobs();
       });
     } else if (agent === "email_monitor" || agent === "job_email_scraper") {
       setEmailProgress(null);
@@ -320,6 +409,7 @@ export default function AdminDashboard() {
           { key: "job_discovery", label: "🔍 Run Job Discovery" },
           { key: "email_monitor", label: "📧 Check Emails" },
           { key: "job_email_scraper", label: "📨 Scrape Job Alert Emails (30d)" },
+          { key: "company_scraper", label: "🏢 Scrape Company Career Pages" },
         ].map((a) => (
           <button
             key={a.key}
@@ -499,9 +589,94 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {/* Company Scraper Progress Panel */}
+      {triggering === "company_scraper" && (
+        <div className="mx-6 mb-4 bg-gray-900 border border-emerald-800 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-semibold text-emerald-300">Scraping Company Career Pages</span>
+              {companyProgress?.progress && (
+                <span className="text-sm text-gray-400">
+                  {companyProgress.progress.completedCompanies}/{companyProgress.progress.totalCompanies} companies
+                  · {companyProgress.progress.totalFound} found
+                  · {companyProgress.progress.totalSaved} saved
+                </span>
+              )}
+            </div>
+            <button
+              onClick={cancelCompanyScraper}
+              disabled={companyCancelling}
+              className="text-sm text-red-400 hover:text-red-300 border border-red-800 px-3 py-1 rounded-lg disabled:opacity-50 transition"
+            >
+              {companyCancelling ? "Cancelling..." : "✕ Cancel"}
+            </button>
+          </div>
+
+          {companyProgress?.progress && (
+            <>
+              <div className="mb-3">
+                <div className="flex justify-between text-xs text-gray-500 mb-1">
+                  <span className="truncate max-w-xs">{companyProgress.progress.currentCompany}</span>
+                  <span>{companyProgress.progress.totalCompanies > 0
+                    ? Math.round((companyProgress.progress.completedCompanies / companyProgress.progress.totalCompanies) * 100)
+                    : 0}%
+                  </span>
+                </div>
+                <div className="w-full bg-gray-800 rounded-full h-2">
+                  <div
+                    className="bg-emerald-500 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${companyProgress.progress.totalCompanies > 0
+                      ? Math.round((companyProgress.progress.completedCompanies / companyProgress.progress.totalCompanies) * 100)
+                      : 0}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Per-company grid */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-1 max-h-56 overflow-y-auto">
+                {companyProgress.progress.companies.map((c, i) => (
+                  <div key={i} className={`flex items-center gap-1.5 text-xs py-1 px-2 rounded-lg ${
+                    c.status === "running" ? "bg-emerald-900/40 border border-emerald-700/50" : "bg-gray-800"
+                  }`}>
+                    <span className={`flex-shrink-0 ${
+                      c.status === "done" && c.saved > 0 ? "text-green-400" :
+                      c.status === "done"    ? "text-gray-600" :
+                      c.status === "running" ? "text-emerald-400" :
+                      c.status === "failed"  ? "text-red-400" : "text-gray-700"
+                    }`}>
+                      {c.status === "done" ? "✓" : c.status === "running" ? "▶" : c.status === "failed" ? "✗" : "·"}
+                    </span>
+                    <span className={`flex-1 truncate ${
+                      c.status === "running" ? "text-emerald-300 font-medium" :
+                      c.status === "done" && c.saved > 0 ? "text-gray-200" :
+                      c.status === "failed" ? "text-red-400" : "text-gray-500"
+                    }`}>{c.name}</span>
+                    {c.status === "done" && c.saved > 0 && (
+                      <span className="flex-shrink-0 text-green-400 font-semibold">{c.saved}</span>
+                    )}
+                    {c.status === "failed" && (
+                      <span className="flex-shrink-0 text-red-500" title={c.error}>!</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {companyProgress.progress.cancelled && (
+                <p className="text-xs text-yellow-400 mt-2">⚠ Cancelled by user</p>
+              )}
+            </>
+          )}
+
+          {!companyProgress?.progress && (
+            <p className="text-sm text-gray-500 animate-pulse">Initialising...</p>
+          )}
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="px-6 border-b border-gray-800 flex gap-1">
-        {(["pipeline", "approvals", "interview", "logs"] as const).map((tab) => (
+        {(["pipeline", "companies", "approvals", "interview", "logs"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -618,6 +793,116 @@ export default function AdminDashboard() {
             })()}
           </div>
         )}
+
+        {/* Companies Tab */}
+        {activeTab === "companies" && (() => {
+          const categories = ["All", "FAANG", "Big Tech", "Product", "Indian Unicorn", "MNC"];
+          const filtered = companyCategoryFilter === "All"
+            ? companyJobs
+            : companyJobs.filter(j => getCompanyCategory(j.source) === companyCategoryFilter);
+
+          // Group by company name within the filtered list
+          const byCompany: Record<string, Job[]> = {};
+          for (const job of filtered) {
+            if (!byCompany[job.company]) byCompany[job.company] = [];
+            byCompany[job.company].push(job);
+          }
+
+          return (
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold">🏢 Company Career Pages</h2>
+                <span className="text-xs text-gray-500">{companyJobs.length} jobs scraped · {Object.keys(byCompany).length} companies</span>
+              </div>
+
+              {/* Category filter tabs */}
+              <div className="flex gap-1 flex-wrap mb-5">
+                {categories.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setCompanyCategoryFilter(cat)}
+                    className={`px-3 py-1 text-xs rounded-full border transition ${
+                      companyCategoryFilter === cat
+                        ? "bg-emerald-700 border-emerald-600 text-white"
+                        : "border-gray-700 text-gray-400 hover:border-gray-500 hover:text-white"
+                    }`}
+                  >
+                    {cat}
+                    {cat !== "All" && (
+                      <span className="ml-1 opacity-60">
+                        {companyJobs.filter(j => getCompanyCategory(j.source) === cat).length}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {companyJobs.length === 0 ? (
+                <div className="text-center py-16">
+                  <p className="text-gray-400 mb-2">No company jobs scraped yet.</p>
+                  <p className="text-gray-600 text-sm">Click <span className="text-emerald-400">🏢 Scrape Company Career Pages</span> above to start.</p>
+                  <p className="text-gray-700 text-xs mt-2">Covers {Object.keys(COMPANY_CATEGORY).length}+ companies: FAANG, Big Tech, Product companies, Indian Unicorns, MNCs</p>
+                </div>
+              ) : filtered.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">No jobs in this category yet.</p>
+              ) : (
+                <div className="space-y-6">
+                  {Object.entries(byCompany).map(([companyName, jobs]) => (
+                    <div key={companyName}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <h3 className="text-sm font-semibold text-white">{companyName}</h3>
+                        <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full">{jobs.length}</span>
+                        <span className="text-xs text-gray-600">{getCompanyCategory(jobs[0].source)}</span>
+                      </div>
+                      <div className="space-y-1.5 ml-2">
+                        {jobs.map(job => (
+                          <div key={job.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-medium text-white text-sm">{job.title}</span>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
+                                  <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
+                                </div>
+                                <div className="text-xs text-gray-400 mt-0.5">
+                                  {job.location && <span>{job.location}</span>}
+                                  <span className="ml-2 text-gray-600">{new Date(job.discovered_at).toLocaleDateString()}</span>
+                                </div>
+                                {(job.salary_min || job.salary_max) && (
+                                  <div className="text-xs text-green-400 mt-1">
+                                    💰 {job.salary_min}{job.salary_max && `–${job.salary_max}`} LPA
+                                  </div>
+                                )}
+                                {job.required_skills?.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {job.required_skills.slice(0, 6).map(s => (
+                                      <span key={s} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{s}</span>
+                                    ))}
+                                    {job.required_skills.length > 6 && <span className="text-xs text-gray-600">+{job.required_skills.length - 6}</span>}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <a href={job.job_url} target="_blank" rel="noopener noreferrer"
+                                  className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">
+                                  Apply →
+                                </a>
+                                <button onClick={() => deleteJob(job.id)}
+                                  className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition">
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Approvals Tab */}
         {activeTab === "approvals" && (
