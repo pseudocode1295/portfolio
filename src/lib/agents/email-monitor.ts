@@ -5,6 +5,36 @@ import { notify } from "@/lib/whatsapp";
 import { isLocationAllowed } from "./location-filter";
 import type { AgentResult, ScrapedJob } from "./types";
 
+export interface EmailItemProgress {
+  subject: string;
+  from: string;
+  type: "linkedin" | "naukri" | "other";
+  status: "pending" | "running" | "done" | "skipped";
+  extracted: number;
+  saved: number;
+}
+
+export interface EmailProgress {
+  agent: "email_monitor" | "job_email_scraper";
+  totalEmails: number;
+  processedEmails: number;
+  currentEmail: string;
+  linkedinEmails: number;
+  naukriEmails: number;
+  totalJobsSaved: number;
+  cancelled: boolean;
+  emails: EmailItemProgress[];
+}
+
+async function isEmailCancelRequested(): Promise<boolean> {
+  const { data } = await supabase.from("stats_cache").select("value").eq("key", "email_agent_cancel").single();
+  return data?.value === true;
+}
+
+async function updateEmailProgress(logId: string, progress: EmailProgress): Promise<void> {
+  await supabase.from("agent_logs").update({ summary: JSON.stringify(progress), jobs_found: progress.totalJobsSaved }).eq("id", logId);
+}
+
 // ─── Job alert email detection ────────────────────────────────────────────────
 
 function isLinkedInJobAlert(from: string, subject: string): boolean {
@@ -300,9 +330,27 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
 
   const { data: logEntry } = await supabase
     .from("agent_logs")
-    .insert({ agent_name: "email_monitor", status: "running", summary: "Checking emails" })
+    .insert({ agent_name: "email_monitor", status: "running", summary: "{}" })
     .select()
     .single();
+
+  const logId = logEntry?.id;
+
+  // Register as running agent
+  await supabase.from("stats_cache").upsert({ key: "email_agent_running_id", value: logId });
+  await supabase.from("stats_cache").upsert({ key: "email_agent_cancel", value: false });
+
+  const progress: EmailProgress = {
+    agent: "email_monitor",
+    totalEmails: 0,
+    processedEmails: 0,
+    currentEmail: "Fetching email list...",
+    linkedinEmails: 0,
+    naukriEmails: 0,
+    totalJobsSaved: 0,
+    cancelled: false,
+    emails: [],
+  };
 
   try {
     const gmail = getGmailClient();
@@ -316,8 +364,18 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
     });
 
     const messages = listData.messages || [];
+    progress.totalEmails = messages.length;
+    progress.currentEmail = `Found ${messages.length} emails to check`;
+    if (logId) await updateEmailProgress(logId, progress);
 
     for (const msg of messages) {
+      if (await isEmailCancelRequested()) {
+        progress.cancelled = true;
+        progress.currentEmail = "Cancelled by user";
+        if (logId) await updateEmailProgress(logId, progress);
+        break;
+      }
+
       // Check if already processed
       const { data: existing } = await supabase
         .from("emails")
@@ -325,7 +383,11 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
         .eq("gmail_message_id", msg.id)
         .single();
 
-      if (existing) continue;
+      if (existing) {
+        progress.processedEmails++;
+        progress.emails.push({ subject: "(already processed)", from: "", type: "other", status: "skipped", extracted: 0, saved: 0 });
+        continue;
+      }
 
       // Fetch full message
       const { data: fullMsg } = await gmail.users.messages.get({
@@ -335,9 +397,15 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
       });
 
       const headers = fullMsg.payload?.headers || [];
-      const subject = headers.find((h) => h.name === "Subject")?.value || "";
+      const subject = headers.find((h) => h.name === "Subject")?.value || "(no subject)";
       const from = headers.find((h) => h.name === "From")?.value || "";
       const dateStr = headers.find((h) => h.name === "Date")?.value || new Date().toISOString();
+
+      // Mark as running
+      const emailItem: EmailItemProgress = { subject, from, type: "other", status: "running", extracted: 0, saved: 0 };
+      progress.emails.push(emailItem);
+      progress.currentEmail = subject.slice(0, 60);
+      if (logId) await updateEmailProgress(logId, progress);
 
       // Decode body (both plain text and HTML)
       let body = "";
@@ -354,8 +422,14 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
 
       // ── LinkedIn job alert ───────────────────────────────────────────────
       if (isLinkedInJobAlert(from, subject)) {
+        emailItem.type = "linkedin";
         const extracted = parseLinkedInJobAlertEmail(body, htmlBody);
         const savedCount = extracted.length > 0 ? await saveLinkedInJobs(extracted) : 0;
+        emailItem.extracted = extracted.length;
+        emailItem.saved = savedCount;
+        emailItem.status = "done";
+        progress.linkedinEmails++;
+        progress.totalJobsSaved += savedCount;
         if (savedCount > 0) await notify.newJobs(savedCount, extracted.slice(0, 3).map(j => `${j.title} @ ${j.company}`));
         await supabase.from("emails").insert({
           job_id: null, gmail_message_id: msg.id, from_email: from, subject,
@@ -363,13 +437,21 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
           received_at: new Date(dateStr).toISOString(), category: "other",
           reply_draft: null, reply_status: "not_needed",
         });
+        progress.processedEmails++;
+        if (logId) await updateEmailProgress(logId, progress);
         continue;
       }
 
       // ── Naukri job alert ─────────────────────────────────────────────────
       if (isNaukriAlert(from, subject)) {
+        emailItem.type = "naukri";
         const extracted = parseNaukriEmail(body, htmlBody, subject);
         const savedCount = extracted.length > 0 ? await saveEmailJobs(extracted, 0.65) : 0;
+        emailItem.extracted = extracted.length;
+        emailItem.saved = savedCount;
+        emailItem.status = "done";
+        progress.naukriEmails++;
+        progress.totalJobsSaved += savedCount;
         if (savedCount > 0) await notify.newJobs(savedCount, extracted.slice(0, 3).map(j => `${j.title} @ ${j.company}`));
         await supabase.from("emails").insert({
           job_id: null, gmail_message_id: msg.id, from_email: from, subject,
@@ -377,6 +459,8 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
           received_at: new Date(dateStr).toISOString(), category: "other",
           reply_draft: null, reply_status: "not_needed",
         });
+        progress.processedEmails++;
+        if (logId) await updateEmailProgress(logId, progress);
         continue;
       }
 
@@ -439,30 +523,38 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
         if (companyName) {
           await notify.interviewInvite(companyName, subject);
         }
-        // Trigger interview prep via API
         fetch(`${process.env.NEXTAUTH_URL || "http://localhost:3000"}/api/agents/interview-prep`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-agent-key": process.env.AGENT_SECRET_KEY! },
           body: JSON.stringify({ jobId, emailId: savedEmail?.id }),
         }).catch(() => {});
       }
+
+      emailItem.status = "done";
+      progress.processedEmails++;
+      if (logId) await updateEmailProgress(logId, progress);
     }
 
     if (actionsTaken > 0) {
       await notify.approvalNeeded("email reply", actionsTaken);
     }
 
+    progress.currentEmail = "Done";
+    const summary = `Processed ${progress.processedEmails}/${progress.totalEmails} emails · ${progress.linkedinEmails} LinkedIn · ${progress.naukriEmails} Naukri · ${progress.totalJobsSaved} jobs saved`;
+    if (logId) await updateEmailProgress(logId, { ...progress, currentEmail: "Done" });
     await supabase.from("agent_logs").update({
       status: "completed",
-      summary: `Processed ${messages.length} emails, ${actionsTaken} need replies`,
+      summary: JSON.stringify({ ...progress, currentEmail: "Done" }),
       actions_taken: actionsTaken,
       duration_ms: Date.now() - startTime,
-    }).eq("id", logEntry?.id);
+    }).eq("id", logId);
+    await supabase.from("stats_cache").upsert({ key: "email_agent_running_id", value: null });
 
-    return { success: true, summary: `Processed ${messages.length} emails, ${actionsTaken} need replies`, actionsTaken };
+    return { success: true, summary, actionsTaken };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    await supabase.from("agent_logs").update({ status: "failed", error_message: msg, duration_ms: Date.now() - startTime }).eq("id", logEntry?.id);
+    await supabase.from("agent_logs").update({ status: "failed", error_message: msg, summary: JSON.stringify(progress), duration_ms: Date.now() - startTime }).eq("id", logId);
+    await supabase.from("stats_cache").upsert({ key: "email_agent_running_id", value: null });
     return { success: false, summary: "Email monitor failed", error: msg };
   }
 }
@@ -473,19 +565,33 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
 
 export async function runJobEmailScraperAgent(daysBack = 30): Promise<AgentResult> {
   const startTime = Date.now();
-  let totalSaved = 0;
-  let totalEmails = 0;
 
   const { data: logEntry } = await supabase
     .from("agent_logs")
-    .insert({ agent_name: "job_email_scraper", status: "running", summary: "Scanning job alert emails..." })
+    .insert({ agent_name: "job_email_scraper", status: "running", summary: "{}" })
     .select().single();
+
+  const logId = logEntry?.id;
+
+  await supabase.from("stats_cache").upsert({ key: "email_agent_running_id", value: logId });
+  await supabase.from("stats_cache").upsert({ key: "email_agent_cancel", value: false });
+
+  const progress: EmailProgress = {
+    agent: "job_email_scraper",
+    totalEmails: 0,
+    processedEmails: 0,
+    currentEmail: "Fetching email list...",
+    linkedinEmails: 0,
+    naukriEmails: 0,
+    totalJobsSaved: 0,
+    cancelled: false,
+    emails: [],
+  };
 
   try {
     const gmail = getGmailClient();
     const since = Math.floor((Date.now() - daysBack * 24 * 60 * 60 * 1000) / 1000);
 
-    // Fetch all LinkedIn + Naukri job alert emails
     const { data: listData } = await gmail.users.messages.list({
       userId: "me",
       q: `after:${since} (from:jobs-noreply@linkedin.com OR from:noreply@linkedin.com OR from:jobalerts-noreply@linkedin.com OR from:donotreply@naukri.com OR from:no-reply@naukri.com OR (subject:"job alert" from:linkedin) OR (subject:"is hiring" from:naukri) OR subject:"jobs for you from")`,
@@ -493,21 +599,40 @@ export async function runJobEmailScraperAgent(daysBack = 30): Promise<AgentResul
     });
 
     const messages = listData.messages || [];
+    progress.totalEmails = messages.length;
+    progress.currentEmail = `Found ${messages.length} job alert emails (${daysBack}d)`;
+    if (logId) await updateEmailProgress(logId, progress);
 
     for (const msg of messages) {
+      if (await isEmailCancelRequested()) {
+        progress.cancelled = true;
+        progress.currentEmail = "Cancelled by user";
+        if (logId) await updateEmailProgress(logId, progress);
+        break;
+      }
+
       // Skip already processed
       const { data: existing } = await supabase
         .from("emails").select("id").eq("gmail_message_id", msg.id).single();
-      if (existing) continue;
+      if (existing) {
+        progress.processedEmails++;
+        progress.emails.push({ subject: "(already processed)", from: "", type: "other", status: "skipped", extracted: 0, saved: 0 });
+        continue;
+      }
 
       const { data: fullMsg } = await gmail.users.messages.get({
         userId: "me", id: msg.id!, format: "full",
       });
 
       const headers = fullMsg.payload?.headers || [];
-      const subject = headers.find(h => h.name === "Subject")?.value || "";
+      const subject = headers.find(h => h.name === "Subject")?.value || "(no subject)";
       const from = headers.find(h => h.name === "From")?.value || "";
       const dateStr = headers.find(h => h.name === "Date")?.value || new Date().toISOString();
+
+      const emailItem: EmailItemProgress = { subject, from, type: "other", status: "running", extracted: 0, saved: 0 };
+      progress.emails.push(emailItem);
+      progress.currentEmail = subject.slice(0, 60);
+      if (logId) await updateEmailProgress(logId, progress);
 
       // Decode body parts (handle nested multipart)
       let body = "", htmlBody = "";
@@ -531,19 +656,28 @@ export async function runJobEmailScraperAgent(daysBack = 30): Promise<AgentResul
       let source = "email";
 
       if (isLinkedInJobAlert(from, subject)) {
+        emailItem.type = "linkedin";
         extracted = parseLinkedInJobAlertEmail(body, htmlBody);
         savedCount = extracted.length > 0 ? await saveLinkedInJobs(extracted) : 0;
         source = "linkedin_email";
+        progress.linkedinEmails++;
       } else if (isNaukriAlert(from, subject)) {
+        emailItem.type = "naukri";
         extracted = parseNaukriEmail(body, htmlBody, subject);
         savedCount = extracted.length > 0 ? await saveEmailJobs(extracted, 0.65) : 0;
         source = "naukri_email";
+        progress.naukriEmails++;
       } else {
-        continue; // not a job alert
+        emailItem.status = "skipped";
+        progress.processedEmails++;
+        continue;
       }
 
-      totalSaved += savedCount;
-      totalEmails++;
+      emailItem.extracted = extracted.length;
+      emailItem.saved = savedCount;
+      emailItem.status = "done";
+      progress.totalJobsSaved += savedCount;
+      progress.processedEmails++;
 
       await supabase.from("emails").insert({
         job_id: null, gmail_message_id: msg.id, from_email: from, subject,
@@ -552,30 +686,29 @@ export async function runJobEmailScraperAgent(daysBack = 30): Promise<AgentResul
         reply_draft: null, reply_status: "not_needed",
       });
 
-      // Update progress in log
-      if (logEntry?.id) {
-        await supabase.from("agent_logs").update({
-          summary: `Scanned ${totalEmails} job alert emails, saved ${totalSaved} jobs so far...`,
-          jobs_found: totalSaved,
-        }).eq("id", logEntry.id);
-      }
+      if (logId) await updateEmailProgress(logId, progress);
     }
 
-    if (totalSaved > 0) await notify.newJobs(totalSaved, [`${totalSaved} jobs from email alerts`]);
+    if (progress.totalJobsSaved > 0) await notify.newJobs(progress.totalJobsSaved, [`${progress.totalJobsSaved} jobs from email alerts`]);
 
-    const summary = `Scanned ${totalEmails} job alert emails (${daysBack}d), saved ${totalSaved} jobs`;
+    progress.currentEmail = "Done";
+    const summary = `Scanned ${progress.processedEmails} job alert emails (${daysBack}d) · ${progress.linkedinEmails} LinkedIn · ${progress.naukriEmails} Naukri · ${progress.totalJobsSaved} jobs saved`;
     await supabase.from("agent_logs").update({
-      status: "completed", summary,
-      jobs_found: totalSaved, actions_taken: totalSaved,
+      status: "completed",
+      summary: JSON.stringify({ ...progress, currentEmail: "Done" }),
+      jobs_found: progress.totalJobsSaved,
+      actions_taken: progress.totalJobsSaved,
       duration_ms: Date.now() - startTime,
-    }).eq("id", logEntry?.id);
+    }).eq("id", logId);
+    await supabase.from("stats_cache").upsert({ key: "email_agent_running_id", value: null });
 
-    return { success: true, summary, jobsFound: totalSaved, actionsTaken: totalSaved };
+    return { success: true, summary, jobsFound: progress.totalJobsSaved, actionsTaken: progress.totalJobsSaved };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     await supabase.from("agent_logs").update({
-      status: "failed", error_message: msg, duration_ms: Date.now() - startTime,
-    }).eq("id", logEntry?.id);
+      status: "failed", error_message: msg, summary: JSON.stringify(progress), duration_ms: Date.now() - startTime,
+    }).eq("id", logId);
+    await supabase.from("stats_cache").upsert({ key: "email_agent_running_id", value: null });
     return { success: false, summary: "Job email scraper failed", error: msg };
   }
 }

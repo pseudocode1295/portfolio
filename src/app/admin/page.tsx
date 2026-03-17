@@ -73,6 +73,35 @@ interface JobProgressData {
   progress?: DiscoveryProgress;
 }
 
+interface EmailItemProgress {
+  subject: string;
+  from: string;
+  type: "linkedin" | "naukri" | "other";
+  status: "pending" | "running" | "done" | "skipped";
+  extracted: number;
+  saved: number;
+}
+
+interface EmailProgress {
+  agent: "email_monitor" | "job_email_scraper";
+  totalEmails: number;
+  processedEmails: number;
+  currentEmail: string;
+  linkedinEmails: number;
+  naukriEmails: number;
+  totalJobsSaved: number;
+  cancelled: boolean;
+  emails: EmailItemProgress[];
+}
+
+interface EmailProgressData {
+  running: boolean;
+  status?: string;
+  logId?: string;
+  agentName?: string;
+  progress?: EmailProgress;
+}
+
 interface DashboardData {
   overview: { totalJobs: number; pendingApprovals: number; appliedJobs: number; interviewJobs: number; statusCounts: Record<string, number> };
   jobs: Job[];
@@ -109,6 +138,9 @@ export default function AdminDashboard() {
   const [jobProgress, setJobProgress] = useState<JobProgressData | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [emailProgress, setEmailProgress] = useState<EmailProgressData | null>(null);
+  const [emailCancelling, setEmailCancelling] = useState(false);
+  const emailPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(async () => {
     const res = await fetch("/api/admin/stats");
@@ -141,7 +173,28 @@ export default function AdminDashboard() {
     await fetch("/api/admin/job-progress", { method: "DELETE" });
   }
 
-  // On mount, check if discovery is already running
+  const startEmailPolling = useCallback((agentKey: string) => {
+    if (emailPollRef.current) return;
+    emailPollRef.current = setInterval(async () => {
+      const res = await fetch("/api/admin/email-progress");
+      const data: EmailProgressData = await res.json();
+      setEmailProgress(data);
+      if (!data.running) {
+        clearInterval(emailPollRef.current!);
+        emailPollRef.current = null;
+        setTriggering(null);
+        setEmailCancelling(false);
+        fetchData();
+      }
+    }, 2000);
+  }, [fetchData]);
+
+  async function cancelEmailAgent() {
+    setEmailCancelling(true);
+    await fetch("/api/admin/email-progress", { method: "DELETE" });
+  }
+
+  // On mount, check if either agent is already running
   useEffect(() => {
     fetch("/api/admin/job-progress")
       .then(r => r.json())
@@ -152,7 +205,16 @@ export default function AdminDashboard() {
           startProgressPolling();
         }
       });
-  }, [startProgressPolling]);
+    fetch("/api/admin/email-progress")
+      .then(r => r.json())
+      .then((data: EmailProgressData) => {
+        if (data.running) {
+          setEmailProgress(data);
+          setTriggering(data.agentName || "email_monitor");
+          startEmailPolling(data.agentName || "email_monitor");
+        }
+      });
+  }, [startProgressPolling, startEmailPolling]);
 
   async function handleApproval(id: string, decision: "approved" | "rejected" | "edited") {
     await fetch("/api/admin/approve", {
@@ -168,7 +230,6 @@ export default function AdminDashboard() {
     if (agent === "job_discovery") {
       setJobProgress(null);
       startProgressPolling();
-      // Fire and forget — progress is tracked via polling
       fetch("/api/admin/trigger", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -177,6 +238,19 @@ export default function AdminDashboard() {
         if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
         setTriggering(null);
         setCancelling(false);
+        fetchData();
+      });
+    } else if (agent === "email_monitor" || agent === "job_email_scraper") {
+      setEmailProgress(null);
+      startEmailPolling(agent);
+      fetch("/api/admin/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent }),
+      }).then(() => {
+        if (emailPollRef.current) { clearInterval(emailPollRef.current); emailPollRef.current = null; }
+        setTriggering(null);
+        setEmailCancelling(false);
         fetchData();
       });
     } else {
@@ -325,6 +399,101 @@ export default function AdminDashboard() {
           )}
 
           {!jobProgress?.progress && (
+            <p className="text-sm text-gray-500 animate-pulse">Initialising...</p>
+          )}
+        </div>
+      )}
+
+      {/* Email Agent Progress Panel */}
+      {(triggering === "email_monitor" || triggering === "job_email_scraper") && (
+        <div className="mx-6 mb-4 bg-gray-900 border border-purple-800 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+              <span className="font-semibold text-purple-300">
+                {triggering === "email_monitor" ? "Checking Emails" : "Scraping Job Alert Emails"}
+              </span>
+              {emailProgress?.progress && (
+                <span className="text-sm text-gray-400">
+                  {emailProgress.progress.processedEmails}/{emailProgress.progress.totalEmails} emails
+                  {emailProgress.progress.totalJobsSaved > 0 && ` · ${emailProgress.progress.totalJobsSaved} jobs saved`}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={cancelEmailAgent}
+              disabled={emailCancelling}
+              className="text-sm text-red-400 hover:text-red-300 border border-red-800 px-3 py-1 rounded-lg disabled:opacity-50 transition"
+            >
+              {emailCancelling ? "Cancelling..." : "✕ Cancel"}
+            </button>
+          </div>
+
+          {emailProgress?.progress && (
+            <>
+              {/* Overall progress bar */}
+              <div className="mb-3">
+                <div className="flex justify-between text-xs text-gray-500 mb-1">
+                  <span className="truncate max-w-xs">{emailProgress.progress.currentEmail}</span>
+                  <span>
+                    {emailProgress.progress.totalEmails > 0
+                      ? Math.round((emailProgress.progress.processedEmails / emailProgress.progress.totalEmails) * 100)
+                      : 0}%
+                  </span>
+                </div>
+                <div className="w-full bg-gray-800 rounded-full h-2">
+                  <div
+                    className="bg-purple-500 h-2 rounded-full transition-all duration-500"
+                    style={{
+                      width: emailProgress.progress.totalEmails > 0
+                        ? `${Math.round((emailProgress.progress.processedEmails / emailProgress.progress.totalEmails) * 100)}%`
+                        : "0%"
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div className="flex gap-4 text-xs text-gray-400 mb-3">
+                <span>LinkedIn: <span className="text-blue-400 font-semibold">{emailProgress.progress.linkedinEmails}</span></span>
+                <span>Naukri: <span className="text-orange-400 font-semibold">{emailProgress.progress.naukriEmails}</span></span>
+                <span>Jobs saved: <span className="text-green-400 font-semibold">{emailProgress.progress.totalJobsSaved}</span></span>
+                {emailProgress.progress.cancelled && <span className="text-yellow-400 font-medium">⚠ Cancelled</span>}
+              </div>
+
+              {/* Per-email list */}
+              <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                {emailProgress.progress.emails.filter(e => e.status !== "skipped" || e.subject !== "(already processed)").map((email, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs py-1 px-2 rounded-lg bg-gray-800">
+                    <span className="flex-shrink-0 w-4 text-center">
+                      {email.status === "done" ? "✓" :
+                       email.status === "running" ? <span className="inline-block w-2 h-2 rounded-full bg-purple-400 animate-pulse" /> :
+                       email.status === "skipped" ? "–" : "·"}
+                    </span>
+                    <span className={`flex-shrink-0 text-xs px-1.5 py-0.5 rounded ${
+                      email.type === "linkedin" ? "bg-blue-900/50 text-blue-300" :
+                      email.type === "naukri" ? "bg-orange-900/50 text-orange-300" :
+                      "bg-gray-700 text-gray-400"
+                    }`}>
+                      {email.type === "linkedin" ? "LI" : email.type === "naukri" ? "NK" : "—"}
+                    </span>
+                    <span className={`flex-1 truncate ${
+                      email.status === "running" ? "text-purple-300 font-medium" :
+                      email.status === "done" ? "text-gray-300" : "text-gray-600"
+                    }`}>{email.subject}</span>
+                    {email.status === "done" && email.saved > 0 && (
+                      <span className="flex-shrink-0 text-green-400 font-semibold">{email.saved} saved</span>
+                    )}
+                    {email.status === "done" && email.saved === 0 && email.extracted > 0 && (
+                      <span className="flex-shrink-0 text-gray-600">{email.extracted} found</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {!emailProgress?.progress && (
             <p className="text-sm text-gray-500 animate-pulse">Initialising...</p>
           )}
         </div>
