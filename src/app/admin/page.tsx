@@ -9,10 +9,16 @@ interface Job {
   id: string;
   title: string;
   company: string;
+  location: string;
   status: JobStatus;
   relevance_score: number;
   discovered_at: string;
   job_url: string;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string;
+  required_skills: string[];
+  source: string;
 }
 
 interface Approval {
@@ -184,6 +190,11 @@ export default function AdminDashboard() {
     }
   }
 
+  async function deleteJob(id: string) {
+    await fetch(`/api/admin/jobs?id=${id}`, { method: "DELETE" });
+    fetchData();
+  }
+
   async function logout() {
     await fetch("/api/admin/auth", { method: "DELETE" });
     router.push("/admin/login");
@@ -352,15 +363,53 @@ export default function AdminDashboard() {
             {/* Job list */}
             <div className="space-y-2">
               {(data?.jobs || []).map((job) => (
-                <div key={job.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <div className="font-medium">{job.title}</div>
-                    <div className="text-sm text-gray-400">{job.company} · {new Date(job.discovered_at).toLocaleDateString()}</div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
-                    <span className={`text-xs px-2 py-1 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
-                    <a href={job.job_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 hover:underline">View →</a>
+                <div key={job.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    {/* Left: title + meta */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-white">{job.title}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
+                        <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
+                      </div>
+                      <div className="text-sm text-gray-400 mt-0.5">
+                        {job.company}
+                        {job.location && <span> · {job.location}</span>}
+                        <span className="ml-2 text-gray-600 text-xs">{job.source}</span>
+                        <span className="ml-2 text-gray-600 text-xs">{new Date(job.discovered_at).toLocaleDateString()}</span>
+                      </div>
+                      {/* Salary */}
+                      {(job.salary_min || job.salary_max) && (
+                        <div className="text-xs text-green-400 mt-1">
+                          💰 {job.salary_min && `${job.salary_min}`}{job.salary_max && `–${job.salary_max}`} LPA
+                        </div>
+                      )}
+                      {/* Skills */}
+                      {job.required_skills?.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {job.required_skills.slice(0, 8).map((skill) => (
+                            <span key={skill} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{skill}</span>
+                          ))}
+                          {job.required_skills.length > 8 && (
+                            <span className="text-xs text-gray-600">+{job.required_skills.length - 8} more</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {/* Right: actions */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <a href={job.job_url} target="_blank" rel="noopener noreferrer"
+                        className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">
+                        View →
+                      </a>
+                      <button
+                        onClick={() => deleteJob(job.id)}
+                        className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition"
+                        title="Remove from pipeline"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
