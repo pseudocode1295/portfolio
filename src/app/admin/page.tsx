@@ -469,45 +469,84 @@ export default function AdminDashboard() {
                     {/* Job discovery: structured breakdown */}
                     {isJobDiscovery && parsedSummary ? (
                       <div>
-                        {/* Summary stats */}
-                        <div className="flex gap-4 mb-3 text-sm">
-                          <span className="text-gray-400">Feeds: <span className="text-white font-medium">{parsedSummary.completedFeeds}/{parsedSummary.totalFeeds}</span></span>
-                          <span className="text-gray-400">Found: <span className="text-white font-medium">{parsedSummary.totalFound}</span></span>
-                          <span className="text-gray-400">Saved: <span className="text-green-400 font-medium">{parsedSummary.totalSaved}</span></span>
-                          {parsedSummary.cancelled && <span className="text-yellow-400 text-xs">⚠ Cancelled early</span>}
+                        {/* Summary stats row */}
+                        <div className="flex flex-wrap gap-x-5 gap-y-1 mb-3 text-sm">
+                          <span className="text-gray-400">Feeds <span className="text-white font-semibold">{parsedSummary.completedFeeds}/{parsedSummary.totalFeeds}</span></span>
+                          <span className="text-gray-400">Scanned <span className="text-white font-semibold">{parsedSummary.totalFound}</span></span>
+                          <span className="text-gray-400">Saved <span className="text-green-400 font-semibold">{parsedSummary.totalSaved}</span></span>
+                          {parsedSummary.totalFound > 0 && (
+                            <span className="text-gray-400">Hit rate <span className="text-white font-semibold">{Math.round((parsedSummary.totalSaved / parsedSummary.totalFound) * 100)}%</span></span>
+                          )}
+                          {parsedSummary.cancelled && <span className="text-yellow-400 text-xs font-medium px-2 py-0.5 bg-yellow-900/30 rounded-full">⚠ Cancelled</span>}
                         </div>
+
                         {/* Progress bar */}
-                        <div className="w-full bg-gray-800 rounded-full h-1.5 mb-3">
-                          <div
-                            className="bg-green-500 h-1.5 rounded-full"
-                            style={{ width: `${Math.round((parsedSummary.completedFeeds / parsedSummary.totalFeeds) * 100)}%` }}
-                          />
+                        <div className="w-full bg-gray-800 rounded-full h-1.5 mb-4">
+                          <div className="bg-green-500 h-1.5 rounded-full transition-all" style={{ width: `${Math.round((parsedSummary.completedFeeds / parsedSummary.totalFeeds) * 100)}%` }} />
                         </div>
-                        {/* Feed breakdown — 2 column grid */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-1">
-                          {parsedSummary.feeds.map((feed, i) => (
-                            <div key={i} className="flex items-center gap-2 text-xs py-1 px-2 rounded bg-gray-800">
-                              <span className={`flex-shrink-0 w-3 text-center font-bold ${
-                                feed.status === "done"    ? "text-green-400" :
-                                feed.status === "running" ? "text-blue-400" :
-                                feed.status === "skipped" ? "text-gray-600" : "text-gray-600"
-                              }`}>
-                                {feed.status === "done" ? "✓" : feed.status === "running" ? "▶" : feed.status === "skipped" ? "–" : "·"}
-                              </span>
-                              <span className={`flex-1 truncate ${
-                                feed.status === "done"    ? "text-gray-300" :
-                                feed.status === "running" ? "text-blue-300 font-medium" :
-                                feed.status === "skipped" ? "text-gray-600" : "text-gray-500"
-                              }`}>{feed.label}</span>
-                              {feed.status === "done" && feed.saved > 0 && (
-                                <span className="text-green-400 font-medium">{feed.saved}</span>
-                              )}
-                              {feed.status === "done" && feed.saved === 0 && (
-                                <span className="text-gray-600">0</span>
-                              )}
+
+                        {/* Grouped by source */}
+                        {(() => {
+                          const sourceOrder = ["indeed", "linkedin", "timesjobs", "weworkremotely", "remotive", "jobicy"];
+                          const grouped: Record<string, FeedProgress[]> = {};
+                          parsedSummary.feeds.forEach(f => {
+                            if (!grouped[f.source]) grouped[f.source] = [];
+                            grouped[f.source].push(f);
+                          });
+                          const sourceLabels: Record<string, string> = {
+                            indeed: "Indeed India", linkedin: "LinkedIn", timesjobs: "TimesJobs",
+                            weworkremotely: "We Work Remotely", remotive: "Remotive", jobicy: "Jobicy",
+                          };
+                          return (
+                            <div className="space-y-2">
+                              {sourceOrder.filter(s => grouped[s]).map(src => {
+                                const feeds = grouped[src];
+                                const srcSaved = feeds.reduce((a, f) => a + f.saved, 0);
+                                const srcFound = feeds.reduce((a, f) => a + f.found, 0);
+                                const hasResults = srcSaved > 0;
+                                return (
+                                  <details key={src} open={hasResults}>
+                                    <summary className="flex items-center gap-2 cursor-pointer select-none list-none py-1.5 px-3 rounded-lg bg-gray-800 hover:bg-gray-750">
+                                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hasResults ? "bg-green-400" : "bg-gray-600"}`} />
+                                      <span className={`text-sm font-medium flex-1 ${hasResults ? "text-white" : "text-gray-400"}`}>{sourceLabels[src] || src}</span>
+                                      <span className="text-xs text-gray-500">{feeds.length} feed{feeds.length > 1 ? "s" : ""}</span>
+                                      {hasResults
+                                        ? <span className="text-xs font-semibold text-green-400 bg-green-900/40 px-2 py-0.5 rounded-full">{srcSaved} saved</span>
+                                        : <span className="text-xs text-gray-600 bg-gray-900 px-2 py-0.5 rounded-full">{srcFound} found · 0 saved</span>
+                                      }
+                                      <span className="text-gray-600 text-xs ml-1">▾</span>
+                                    </summary>
+                                    <div className="mt-1 ml-3 space-y-0.5">
+                                      {feeds.map((feed, i) => (
+                                        <div key={i} className="flex items-center gap-2 text-xs py-1 px-3 rounded">
+                                          <span className={`flex-shrink-0 font-bold ${
+                                            feed.status === "done" && feed.saved > 0 ? "text-green-400" :
+                                            feed.status === "done"    ? "text-gray-600" :
+                                            feed.status === "running" ? "text-blue-400" :
+                                            feed.status === "skipped" ? "text-gray-700" : "text-gray-700"
+                                          }`}>
+                                            {feed.status === "done" ? "✓" : feed.status === "running" ? "▶" : feed.status === "skipped" ? "–" : "·"}
+                                          </span>
+                                          {/* Strip source prefix from label for cleaner display */}
+                                          <span className={`flex-1 truncate ${
+                                            feed.saved > 0       ? "text-gray-200" :
+                                            feed.status === "done"    ? "text-gray-500" :
+                                            feed.status === "skipped" ? "text-gray-700" : "text-gray-500"
+                                          }`}>{feed.label.replace(/^[^—]+—\s*/, "")}</span>
+                                          {feed.status === "done" && (
+                                            feed.saved > 0
+                                              ? <span className="text-green-400 font-semibold">{feed.saved} saved</span>
+                                              : <span className="text-gray-700">{feed.found} found</span>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </details>
+                                );
+                              })}
                             </div>
-                          ))}
-                        </div>
+                          );
+                        })()}
                       </div>
                     ) : (
                       /* Other agents: plain summary */
