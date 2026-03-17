@@ -117,7 +117,7 @@ export default function AdminDashboard() {
     </div>
   );
 
-  const overview = data?.overview || {};
+  const overview = data?.overview ?? { totalJobs: 0, pendingApprovals: 0, appliedJobs: 0, interviewJobs: 0, statusCounts: {} as Record<string, number> };
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">

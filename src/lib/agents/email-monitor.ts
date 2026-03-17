@@ -44,14 +44,11 @@ async function parseLinkedInJobAlertEmail(body: string, htmlBody: string): Promi
       title: card?.[1]?.trim() || "ML Engineer",
       company: card?.[2]?.trim() || "Unknown",
       location: card?.[3]?.trim() || "India",
-      salaryMin: null,
-      salaryMax: null,
-      salaryCurrency: "INR",
       jobUrl: url,
       source: "linkedin_email",
       description: `Found via LinkedIn job alert email`,
       requiredSkills: [],
-      jobIdExternal: jobId,
+      jobIdExternal: jobId ?? undefined,
     });
   });
 

@@ -90,14 +90,11 @@ function parseRSS(xml: string, source: string): ScrapedJob[] {
       title,
       company,
       location,
-      salaryMin: null,
-      salaryMax: null,
-      salaryCurrency: "INR",
       jobUrl: link,
       source,
       description,
       requiredSkills: extractSkills(description),
-      jobIdExternal: link.match(/jk=([a-z0-9]+)/i)?.[1] || null,
+      jobIdExternal: link.match(/jk=([a-z0-9]+)/i)?.[1] ?? undefined,
     });
   }
   return jobs;
@@ -111,14 +108,12 @@ function parseRemotive(data: any, source: string): ScrapedJob[] {
     title: j.title || "",
     company: j.company_name || "Unknown",
     location: j.candidate_required_location || "Remote",
-    salaryMin: null,
-    salaryMax: null,
     salaryCurrency: "USD",
     jobUrl: j.url || "",
     source,
     description: cleanHtml(j.description || "").slice(0, 400),
     requiredSkills: extractSkills((j.tags || []).join(" ") + " " + (j.description || "")),
-    jobIdExternal: String(j.id || ""),
+    jobIdExternal: String(j.id || "") || undefined,
   }));
 }
 
@@ -130,14 +125,14 @@ function parseJobicy(data: any, source: string): ScrapedJob[] {
     title: j.jobTitle || "",
     company: j.companyName || "Unknown",
     location: j.jobGeo || "Remote",
-    salaryMin: j.annualSalaryMin ? Math.round(j.annualSalaryMin / 83000) : null, // USD → LPA approx
-    salaryMax: j.annualSalaryMax ? Math.round(j.annualSalaryMax / 83000) : null,
+    salaryMin: j.annualSalaryMin ? Math.round(j.annualSalaryMin / 83000) : undefined,
+    salaryMax: j.annualSalaryMax ? Math.round(j.annualSalaryMax / 83000) : undefined,
     salaryCurrency: j.salaryCurrency || "USD",
     jobUrl: j.url || "",
     source,
     description: cleanHtml(j.jobDescription || "").slice(0, 400),
     requiredSkills: extractSkills((j.jobIndustry || "") + " " + (j.jobDescription || "")),
-    jobIdExternal: String(j.id || ""),
+    jobIdExternal: String(j.id || "") || undefined,
   }));
 }
 
