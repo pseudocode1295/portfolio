@@ -759,33 +759,30 @@ export default function AdminDashboard() {
               );
 
               return (
-                <div className="space-y-8">
-                  {/* Section 1: Job Discovery */}
-                  <div>
-                    <div className="flex items-center gap-3 mb-3">
-                      <h3 className="text-base font-semibold text-blue-300">🔍 Job Discovery</h3>
-                      <span className="text-xs bg-blue-900/40 text-blue-400 px-2 py-0.5 rounded-full">{feedJobs.length} jobs</span>
-                      <span className="text-xs text-gray-600">RSS &amp; API feeds · Indeed, LinkedIn, TimesJobs, Remotive...</span>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Column 1: Job Discovery */}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-3 pb-2 border-b border-blue-900/40">
+                      <h3 className="text-sm font-semibold text-blue-300">🔍 Job Discovery</h3>
+                      <span className="text-xs bg-blue-900/40 text-blue-400 px-2 py-0.5 rounded-full">{feedJobs.length}</span>
+                      <span className="text-xs text-gray-600 truncate">RSS &amp; API feeds</span>
                     </div>
                     <div className="space-y-2">
                       {feedJobs.map(job => <JobCard key={job.id} job={job} />)}
-                      {!feedJobs.length && <p className="text-gray-600 text-sm py-4 pl-2">No feed jobs yet. Run Job Discovery above.</p>}
+                      {!feedJobs.length && <p className="text-gray-600 text-sm py-4">No feed jobs yet.</p>}
                     </div>
                   </div>
 
-                  {/* Divider */}
-                  <div className="border-t border-gray-800" />
-
-                  {/* Section 2: Email Alerts */}
-                  <div>
-                    <div className="flex items-center gap-3 mb-3">
-                      <h3 className="text-base font-semibold text-purple-300">📨 Email Alerts</h3>
-                      <span className="text-xs bg-purple-900/40 text-purple-400 px-2 py-0.5 rounded-full">{emailJobs.length} jobs</span>
-                      <span className="text-xs text-gray-600">Scraped from LinkedIn &amp; Naukri job alert emails</span>
+                  {/* Column 2: Email Alerts */}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 mb-3 pb-2 border-b border-purple-900/40">
+                      <h3 className="text-sm font-semibold text-purple-300">📨 Email Alerts</h3>
+                      <span className="text-xs bg-purple-900/40 text-purple-400 px-2 py-0.5 rounded-full">{emailJobs.length}</span>
+                      <span className="text-xs text-gray-600 truncate">LinkedIn &amp; Naukri emails</span>
                     </div>
                     <div className="space-y-2">
                       {emailJobs.map(job => <JobCard key={job.id} job={job} />)}
-                      {!emailJobs.length && <p className="text-gray-600 text-sm py-4 pl-2">No email jobs yet. Run Scrape Job Alert Emails above.</p>}
+                      {!emailJobs.length && <p className="text-gray-600 text-sm py-4">No email jobs yet.</p>}
                     </div>
                   </div>
                 </div>
