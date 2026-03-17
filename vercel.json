@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/agents/orchestrator?mode=daily&key=02e484d219d6254e7dfe63dda049f4bd2606a60b7f5b46dcf5c1c177eb96498d",
+      "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/agents/orchestrator?mode=email_check&key=02e484d219d6254e7dfe63dda049f4bd2606a60b7f5b46dcf5c1c177eb96498d",
+      "schedule": "0 */2 * * *"
+    }
+  ]
+}
