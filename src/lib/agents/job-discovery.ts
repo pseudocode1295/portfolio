@@ -12,6 +12,13 @@ const RSS_FEEDS = [
   { source: "indeed", type: "rss", url: "https://in.indeed.com/rss?q=GenAI+Engineer+Python&l=India&sort=date" },
   { source: "indeed", type: "rss", url: "https://in.indeed.com/rss?q=Applied+Scientist+AI&l=India&sort=date" },
 
+  // LinkedIn Jobs RSS (no login required for public listings)
+  { source: "linkedin", type: "rss", url: "https://www.linkedin.com/jobs/search/?keywords=Senior+ML+Engineer&location=India&f_TPR=r86400&rssFeed=1&rssId=1" },
+  { source: "linkedin", type: "rss", url: "https://www.linkedin.com/jobs/search/?keywords=GenAI+Engineer&location=India&f_TPR=r86400&rssFeed=1&rssId=2" },
+  { source: "linkedin", type: "rss", url: "https://www.linkedin.com/jobs/search/?keywords=LLM+Engineer&location=India&f_TPR=r86400&rssFeed=1&rssId=3" },
+  { source: "linkedin", type: "rss", url: "https://www.linkedin.com/jobs/search/?keywords=AI+Platform+Engineer&location=India&f_TPR=r86400&rssFeed=1&rssId=4" },
+  { source: "linkedin", type: "rss", url: "https://www.linkedin.com/jobs/search/?keywords=Machine+Learning+Engineer&location=India&f_E=4%2C5&f_TPR=r86400&rssFeed=1&rssId=5" },
+
   // TimesJobs India (RSS)
   { source: "timesjobs", type: "rss", url: "https://www.timesjobs.com/candidate/job-search.html?searchType=personalizedSearch&from=submit&txtKeywords=ML+Engineer&txtLocation=India&rssFeed=true" },
   { source: "timesjobs", type: "rss", url: "https://www.timesjobs.com/candidate/job-search.html?searchType=personalizedSearch&from=submit&txtKeywords=Machine+Learning&txtLocation=India&rssFeed=true" },
@@ -139,11 +146,19 @@ function parseJobicy(data: any, source: string): ScrapedJob[] {
 async function fetchRSS(url: string, source: string): Promise<ScrapedJob[]> {
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; JobBot/1.0)" },
-      signal: AbortSignal.timeout(10000),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; JobBot/1.0)",
+        // LinkedIn needs these headers to return RSS without redirect
+        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+      },
+      signal: AbortSignal.timeout(12000),
+      redirect: "follow",
     });
     if (!res.ok) return [];
-    return parseRSS(await res.text(), source);
+    const text = await res.text();
+    // LinkedIn may redirect to HTML login page — detect and skip
+    if (text.includes("<!DOCTYPE html") || text.includes("<html")) return [];
+    return parseRSS(text, source);
   } catch {
     return [];
   }

@@ -2,7 +2,90 @@ import { google } from "googleapis";
 import { supabase } from "@/lib/supabase";
 import { callClaude } from "@/lib/claude";
 import { notify } from "@/lib/whatsapp";
-import type { AgentResult } from "./types";
+import type { AgentResult, ScrapedJob } from "./types";
+
+// ─── LinkedIn job alert email parser ─────────────────────────────────────────
+
+function isLinkedInJobAlert(from: string, subject: string): boolean {
+  return (
+    from.toLowerCase().includes("linkedin") ||
+    from.toLowerCase().includes("jobs-noreply@linkedin.com") ||
+    subject.toLowerCase().includes("jobs you may be interested in") ||
+    subject.toLowerCase().includes("new jobs for you") ||
+    subject.toLowerCase().includes("job alert") ||
+    subject.toLowerCase().includes("recommended jobs")
+  );
+}
+
+async function parseLinkedInJobAlertEmail(body: string, htmlBody: string): Promise<ScrapedJob[]> {
+  const jobs: ScrapedJob[] = [];
+  const content = htmlBody || body;
+
+  // Extract job URLs — LinkedIn job links look like:
+  // https://www.linkedin.com/jobs/view/1234567890
+  const jobUrlPattern = /https?:\/\/www\.linkedin\.com\/jobs\/view\/(\d+)[^\s"<]*/g;
+  const titlePattern = /(?:title|position)[:\s"]+([^"<\n]+)/gi;
+
+  const urlMatches = [...content.matchAll(jobUrlPattern)];
+  const uniqueUrls = [...new Set(urlMatches.map(m => m[0].split("?")[0]))];
+
+  // Try to extract job cards — LinkedIn emails contain structured job info
+  // Pattern: title followed by company and location in close proximity
+  const jobCardPattern =
+    /([A-Z][^\n<"]{5,80})\s*(?:<[^>]+>|\s)*([A-Z][^\n<"]{2,60})\s*(?:<[^>]+>|\s)*([A-Z][^\n<"]{2,40}(?:India|Remote|Bangalore|Mumbai|Delhi|Hyderabad|Pune|Chennai|Gurugram|Noida)[^\n<"]{0,30})/gi;
+
+  const cardMatches = [...content.matchAll(jobCardPattern)];
+
+  uniqueUrls.forEach((url, i) => {
+    const card = cardMatches[i];
+    const jobId = url.match(/\/view\/(\d+)/)?.[1] || null;
+
+    jobs.push({
+      title: card?.[1]?.trim() || "ML Engineer",
+      company: card?.[2]?.trim() || "Unknown",
+      location: card?.[3]?.trim() || "India",
+      salaryMin: null,
+      salaryMax: null,
+      salaryCurrency: "INR",
+      jobUrl: url,
+      source: "linkedin_email",
+      description: `Found via LinkedIn job alert email`,
+      requiredSkills: [],
+      jobIdExternal: jobId,
+    });
+  });
+
+  return jobs;
+}
+
+async function saveLinkedInJobs(jobs: ScrapedJob[]): Promise<number> {
+  let saved = 0;
+  for (const job of jobs) {
+    if (!job.jobUrl) continue;
+    const { error } = await supabase.from("jobs").upsert(
+      {
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        salary_min: null,
+        salary_max: null,
+        salary_currency: "INR",
+        job_url: job.jobUrl,
+        source: job.source,
+        description: job.description,
+        required_skills: [],
+        job_id_external: job.jobIdExternal,
+        status: "discovered",
+        relevance_score: 0.75, // LinkedIn recommended = high relevance
+      },
+      { onConflict: "job_url", ignoreDuplicates: true }
+    );
+    if (!error) saved++;
+  }
+  return saved;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function getGmailClient() {
   const auth = new google.auth.OAuth2(
@@ -82,12 +165,12 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
   try {
     const gmail = getGmailClient();
 
-    // Search for job-related emails from the last 24 hours
+    // Search for job-related emails + LinkedIn job alerts from the last 24 hours
     const since = Math.floor((Date.now() - 24 * 60 * 60 * 1000) / 1000);
     const { data: listData } = await gmail.users.messages.list({
       userId: "me",
-      q: `after:${since} (interview OR application OR "job offer" OR "your application" OR "next steps" OR recruiter)`,
-      maxResults: 20,
+      q: `after:${since} (interview OR application OR "job offer" OR "your application" OR "next steps" OR recruiter OR "jobs you may be interested" OR "new jobs for you" OR "job alert" OR from:jobs-noreply@linkedin.com)`,
+      maxResults: 50,
     });
 
     const messages = listData.messages || [];
@@ -114,14 +197,41 @@ export async function runEmailMonitorAgent(): Promise<AgentResult> {
       const from = headers.find((h) => h.name === "From")?.value || "";
       const dateStr = headers.find((h) => h.name === "Date")?.value || new Date().toISOString();
 
-      // Decode body
+      // Decode body (both plain text and HTML)
       let body = "";
+      let htmlBody = "";
       const parts = fullMsg.payload?.parts || [fullMsg.payload];
       for (const part of parts) {
-        if (part?.mimeType === "text/plain" && part.body?.data) {
+        if (part?.mimeType === "text/plain" && part.body?.data && !body) {
           body = Buffer.from(part.body.data, "base64").toString("utf-8");
-          break;
         }
+        if (part?.mimeType === "text/html" && part.body?.data && !htmlBody) {
+          htmlBody = Buffer.from(part.body.data, "base64").toString("utf-8");
+        }
+      }
+
+      // ── LinkedIn job alert: extract and save jobs directly ──────────────
+      if (isLinkedInJobAlert(from, subject)) {
+        const linkedInJobs = await parseLinkedInJobAlertEmail(body, htmlBody);
+        if (linkedInJobs.length > 0) {
+          const savedCount = await saveLinkedInJobs(linkedInJobs);
+          if (savedCount > 0) {
+            await notify.newJobs(savedCount, linkedInJobs.slice(0, 3).map(j => `${j.title} @ ${j.company}`));
+          }
+        }
+        // Mark as processed in emails table but skip reply drafting
+        await supabase.from("emails").insert({
+          job_id: null,
+          gmail_message_id: msg.id,
+          from_email: from,
+          subject,
+          body: `[LinkedIn job alert — ${linkedInJobs.length} jobs extracted]`,
+          received_at: new Date(dateStr).toISOString(),
+          category: "other",
+          reply_draft: null,
+          reply_status: "not_needed",
+        }).select().single();
+        continue;
       }
 
       // Categorize
