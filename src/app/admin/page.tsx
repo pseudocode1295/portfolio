@@ -379,6 +379,17 @@ export default function AdminDashboard() {
     fetchData();
   }
 
+  async function clearBadEmailJobs() {
+    const bad = (data?.jobs || []).filter(j =>
+      j.source?.endsWith("_email") && (
+        /^your job alert/i.test(j.title) ||
+        j.company === ".." || j.company === "Unknown" || j.company === ""
+      )
+    );
+    await Promise.all(bad.map(j => fetch(`/api/admin/jobs?id=${j.id}`, { method: "DELETE" })));
+    fetchData();
+  }
+
   async function logout() {
     await fetch("/api/admin/auth", { method: "DELETE" });
     router.push("/admin/login");
@@ -781,44 +792,59 @@ export default function AdminDashboard() {
         {/* Email Alerts Tab */}
         {activeTab === "email_alerts" && (() => {
           const jobs = (data?.jobs || []).filter(j => j.source?.endsWith("_email"));
-          const JobCard = ({ job }: { job: Job }) => (
-            <div className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold text-white">{job.title}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
-                    <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
-                  </div>
-                  <div className="text-sm text-gray-400 mt-0.5">
-                    {job.company}{job.location && <span> · {job.location}</span>}
-                    <span className="ml-2 text-gray-600 text-xs">{job.source}</span>
-                    <span className="ml-2 text-gray-600 text-xs">{new Date(job.discovered_at).toLocaleDateString()}</span>
-                  </div>
-                  {(job.salary_min || job.salary_max) && (
-                    <div className="text-xs text-green-400 mt-1">💰 {job.salary_min}{job.salary_max && `–${job.salary_max}`} LPA</div>
-                  )}
-                  {job.required_skills?.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {job.required_skills.slice(0, 8).map(s => (
-                        <span key={s} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{s}</span>
-                      ))}
-                      {job.required_skills.length > 8 && <span className="text-xs text-gray-600">+{job.required_skills.length - 8} more</span>}
+          const badJobs = jobs.filter(j =>
+            /^your job alert/i.test(j.title) || j.company === ".." || j.company === "Unknown" || j.company === ""
+          );
+          const isBadTitle = (title: string) => /^your job alert/i.test(title);
+          const isBadCompany = (co: string) => !co || co === ".." || co === "Unknown";
+
+          const EmailJobCard = ({ job }: { job: Job }) => {
+            const badTitle = isBadTitle(job.title);
+            const badCompany = isBadCompany(job.company);
+            // Extract job ID from LinkedIn URL for display
+            const liJobId = job.job_url?.match(/jobs\/view\/(\d+)/)?.[1];
+            const displayTitle = badTitle ? (liJobId ? `LinkedIn Job #${liJobId}` : "Job Alert") : job.title;
+            const displayCompany = badCompany ? "—" : job.company;
+            return (
+              <div className={`bg-gray-900 border rounded-xl px-4 py-3 ${badTitle || badCompany ? "border-yellow-900/40" : "border-gray-800"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`font-semibold ${badTitle ? "text-gray-400 italic" : "text-white"}`}>{displayTitle}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
+                      <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
+                      {(badTitle || badCompany) && <span className="text-xs text-yellow-700 border border-yellow-900/40 px-1.5 py-0.5 rounded">poor parse</span>}
                     </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <a href={job.job_url} target="_blank" rel="noopener noreferrer"
-                    className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">View →</a>
-                  <button onClick={() => deleteJob(job.id)}
-                    className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition" title="Remove">✕</button>
+                    <div className="text-sm text-gray-400 mt-0.5">
+                      <span className={badCompany ? "text-gray-600" : ""}>{displayCompany}</span>
+                      {job.location && <span> · {job.location}</span>}
+                      <span className="ml-2 text-gray-600 text-xs">{job.source}</span>
+                      <span className="ml-2 text-gray-600 text-xs">{new Date(job.discovered_at).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <a href={job.job_url} target="_blank" rel="noopener noreferrer"
+                      className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">View →</a>
+                    <button onClick={() => deleteJob(job.id)}
+                      className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition" title="Remove">✕</button>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
+            );
+          };
+
           return (
             <div className="space-y-2">
-              {jobs.map(job => <JobCard key={job.id} job={job} />)}
+              {badJobs.length > 0 && (
+                <div className="flex items-center justify-between bg-yellow-950/30 border border-yellow-900/40 rounded-xl px-4 py-3 mb-2">
+                  <span className="text-sm text-yellow-400">⚠️ {badJobs.length} jobs with poor parsing (email subject used as title). Re-run the scraper to get fresh results.</span>
+                  <button onClick={clearBadEmailJobs}
+                    className="text-xs text-red-400 hover:text-red-300 border border-red-900/50 px-3 py-1.5 rounded-lg transition ml-4 whitespace-nowrap">
+                    Clear {badJobs.length} bad jobs
+                  </button>
+                </div>
+              )}
+              {jobs.map(job => <EmailJobCard key={job.id} job={job} />)}
               {!jobs.length && <p className="text-gray-500 text-center py-8">No email jobs yet. Run <span className="text-purple-400">📨 Scrape Job Alert Emails</span> above.</p>}
             </div>
           );

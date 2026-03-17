@@ -78,57 +78,84 @@ function htmlToText(html: string): string {
 function parseLinkedInJobAlertEmail(body: string, htmlBody: string): ScrapedJob[] {
   const jobs: ScrapedJob[] = [];
   const content = htmlBody || body;
-  const plain = htmlToText(content);
 
-  // LinkedIn job URLs (comm/ tracking links redirect to jobs/view/)
-  const urlPattern = /https?:\/\/(?:www\.)?linkedin\.com\/comm\/jobs\/view\/(\d+)[^\s"<]*/g;
-  const urlPattern2 = /https?:\/\/(?:www\.)?linkedin\.com\/jobs\/view\/(\d+)[^\s"<]*/g;
+  // Find all LinkedIn job URLs in href attributes (they won't appear in plain text)
+  const hrefPattern = /href="(https?:\/\/(?:www\.)?linkedin\.com\/(?:comm\/)?jobs\/view\/(\d+)[^"]*)"/gi;
 
-  const rawUrls = [
-    ...[...content.matchAll(urlPattern)].map(m => ({ url: m[0], id: m[1] })),
-    ...[...content.matchAll(urlPattern2)].map(m => ({ url: m[0], id: m[1] })),
-  ];
+  const urlMap = new Map<string, string>();   // jobId -> cleanUrl
+  const urlPositions = new Map<string, number>(); // jobId -> char position in HTML
 
-  // Deduplicate by job ID
-  const seen = new Map<string, string>();
-  for (const { url, id } of rawUrls) {
-    if (!seen.has(id)) seen.set(id, url.split("?")[0]);
+  for (const m of [...content.matchAll(hrefPattern)]) {
+    if (!urlMap.has(m[2])) {
+      urlMap.set(m[2], m[1].split("?")[0]);
+      urlPositions.set(m[2], m.index ?? 0);
+    }
   }
 
-  // For each job ID, find title/company/location in plain text near the URL position
-  // LinkedIn email plain text structure (per job card):
-  //   Job Title\nCompany · Location (On-site/Hybrid/Remote)\n...
-  const lines = plain.split("\n").map(l => l.trim()).filter(Boolean);
+  if (urlMap.size === 0) return jobs;
 
   const INDIA_CITIES = /bangalore|mumbai|delhi|hyderabad|pune|chennai|gurugram|noida|kolkata|india|remote/i;
+  const SKIP = /^(view job|apply|see all|easy apply|promoted|actively|your job alert|jobs for you|new jobs|recommended|unsubscribe|linkedin|manage|privacy|terms|dear|hi |hello)/i;
 
-  seen.forEach((cleanUrl, jobId) => {
-    // Find the line index where this job ID appears
-    const idLineIdx = lines.findIndex(l => l.includes(jobId));
-    // Scan nearby lines for title/company/location pattern
-    let title = "", company = "", location = "India";
+  // Sort by position so we can slice between consecutive job cards
+  const sortedIds = [...urlPositions.entries()].sort((a, b) => a[1] - b[1]);
 
-    // Search a window of lines around the job ID
-    const window = lines.slice(Math.max(0, idLineIdx - 8), idLineIdx + 8);
-    for (let i = 0; i < window.length; i++) {
-      const line = window[i];
-      // Title: sentence-case, 5-80 chars, not a URL, not a button label
-      if (!title && line.length > 5 && line.length < 80 &&
-          !line.startsWith("http") && !/^(view|apply|see all|easy apply|promoted|actively)/i.test(line) &&
-          /[A-Z]/.test(line[0])) {
+  sortedIds.forEach(([jobId, pos], idx) => {
+    const cleanUrl = urlMap.get(jobId)!;
+
+    // Try to extract title from the anchor tag text
+    // Slice context around this href position
+    const contextWindow = content.slice(Math.max(0, pos - 50), pos + 800);
+
+    // Extract anchor text: href="...job/view/ID..."  >TEXT</a>
+    const anchorTextMatch = contextWindow.match(
+      /href="[^"]*jobs\/view\/\d+[^"]*"[^>]*>([\s\S]{1,200}?)<\/a>/i
+    );
+    const anchorText = anchorTextMatch ? htmlToText(anchorTextMatch[1]).trim() : "";
+
+    // Per-card context: from this URL's position to the next (max 1200 chars ahead)
+    const nextPos = sortedIds[idx + 1]?.[1] ?? pos + 1200;
+    const cardHtml = content.slice(Math.max(0, pos - 400), Math.min(nextPos, pos + 1200));
+    const cardLines = htmlToText(cardHtml)
+      .split("\n")
+      .map(l => l.trim())
+      .filter(Boolean);
+
+    let title = "";
+    let company = "Unknown";
+    let location = "India";
+
+    // 1. Anchor text as title (most reliable when LinkedIn puts the title there)
+    if (anchorText.length > 4 && anchorText.length < 100 && !SKIP.test(anchorText)) {
+      title = anchorText;
+    }
+
+    // 2. Scan card lines for title / company · location
+    for (const line of cardLines) {
+      if (line.length < 4 || line.startsWith("http") || SKIP.test(line)) continue;
+
+      // Title: capital start, reasonable length, not a city/location line
+      if (!title && /[A-Z]/.test(line[0]) && line.length > 4 && line.length < 100 &&
+          !INDIA_CITIES.test(line) && !line.includes(" · ")) {
         title = line;
       }
-      // Company · Location pattern
-      if (line.includes(" · ") || INDIA_CITIES.test(line)) {
+
+      // Company · Location  (e.g. "Google · Bengaluru, Karnataka")
+      if (line.includes(" · ")) {
         const parts = line.split(" · ");
-        if (!company && parts[0] && parts[0].length < 60) company = parts[0].trim();
-        if (!location && parts[1]) location = parts[1].trim();
-        else if (INDIA_CITIES.test(line) && !location) location = line.trim().slice(0, 60);
+        const p0 = parts[0].trim();
+        const p1 = parts[1]?.trim();
+        if (company === "Unknown" && p0.length > 1 && p0.length < 60 && p0 !== title) {
+          company = p0;
+        }
+        if (p1 && location === "India") location = p1.slice(0, 60);
+        if (company !== "Unknown") break; // found what we need
+      } else if (INDIA_CITIES.test(line) && location === "India" && line.length < 80) {
+        location = line;
       }
     }
 
     if (!title) title = "ML/AI Engineer";
-    if (!company) company = "Unknown";
 
     jobs.push({
       title,
