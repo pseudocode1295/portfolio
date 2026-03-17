@@ -1,20 +1,16 @@
 import { NextResponse } from "next/server";
-import { anthropic } from "@/lib/claude";
+import { callGemini } from "@/lib/claude";
 import { supabase } from "@/lib/supabase";
 
 export async function GET() {
   const results: Record<string, unknown> = {};
 
-  // Test Claude
+  // Test Gemini
   try {
-    const r = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 50,
-      messages: [{ role: "user", content: "Say hi" }],
-    });
-    results.claude = "OK: " + (r.content[0] as { text: string }).text;
+    const r = await callGemini("You are a test assistant.", "Say hi", 50);
+    results.gemini = "OK: " + r;
   } catch (e) {
-    results.claude = "ERROR: " + String(e);
+    results.gemini = "ERROR: " + String(e);
   }
 
   // Test Supabase

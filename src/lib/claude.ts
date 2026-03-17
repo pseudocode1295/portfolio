@@ -1,8 +1,21 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-export const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
+// Gemini client (free tier)
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+
+export async function callGemini(
+  systemPrompt: string,
+  userMessage: string,
+  maxTokens = 4096
+): Promise<string> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.0-flash",
+    systemInstruction: systemPrompt,
+    generationConfig: { maxOutputTokens: maxTokens },
+  });
+  const result = await model.generateContent(userMessage);
+  return result.response.text();
+}
 
 // Profile context used by all agents
 export const AJAY_PROFILE = `
@@ -31,20 +44,5 @@ Certifications: Azure AI Engineer, Azure Data Scientist, Azure Developer Associa
 Target Roles: ML Engineer, Senior ML Engineer, GenAI Engineer, AI Platform Engineer, AI/ML Lead
 `;
 
-export async function callClaude(
-  systemPrompt: string,
-  userMessage: string,
-  maxTokens = 4096
-): Promise<string> {
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: maxTokens,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userMessage }],
-  });
-
-  for (const block of response.content) {
-    if (block.type === "text") return block.text;
-  }
-  return "";
-}
+// Alias so existing agent imports don't break
+export const callClaude = callGemini;
