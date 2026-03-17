@@ -2,6 +2,7 @@ import { google } from "googleapis";
 import { supabase } from "@/lib/supabase";
 import { callClaude } from "@/lib/claude";
 import { notify } from "@/lib/whatsapp";
+import { isLocationAllowed } from "./location-filter";
 import type { AgentResult, ScrapedJob } from "./types";
 
 // ─── Job alert email detection ────────────────────────────────────────────────
@@ -197,6 +198,7 @@ async function saveEmailJobs(jobs: ScrapedJob[], relevanceScore: number): Promis
   let saved = 0;
   for (const job of jobs) {
     if (!job.jobUrl || !job.title) continue;
+    if (!isLocationAllowed(job.location || "")) continue;
     const { error } = await supabase.from("jobs").upsert(
       {
         title: job.title,

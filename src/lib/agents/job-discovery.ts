@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { notify } from "@/lib/whatsapp";
+import { isLocationAllowed } from "./location-filter";
 import type { AgentResult, ScrapedJob } from "./types";
 
 // ─── Feed Definitions ────────────────────────────────────────────────────────
@@ -195,6 +196,7 @@ async function saveFeedJobs(jobs: ScrapedJob[], seen: Set<string>): Promise<numb
   for (const job of jobs) {
     if (!job.jobUrl || !job.title || seen.has(job.jobUrl)) continue;
     seen.add(job.jobUrl);
+    if (!isLocationAllowed(job.location || "")) continue;
     if (scoreJobRelevance(job) < 0.4) continue;
     const { error } = await supabase.from("jobs").upsert(
       {
