@@ -1037,120 +1037,228 @@ export default function AdminDashboard() {
             <h2 className="text-lg font-semibold mb-4">Agent Logs</h2>
             <div className="space-y-3">
               {(data?.recentLogs || []).map((log) => {
-                // Try to parse JSON summary (job_discovery stores progress JSON)
-                let parsedSummary: DiscoveryProgress | null = null;
-                try { parsedSummary = JSON.parse(log.summary); } catch { /* plain text */ }
-                const isJobDiscovery = log.agent_name === "job_discovery" && parsedSummary?.feeds;
+                // Parse JSON summary into the correct type
+                let parsed: DiscoveryProgress | EmailProgress | CompanyProgress | null = null;
+                try { parsed = JSON.parse(log.summary); } catch { /* plain text */ }
+
+                const isJobDiscovery  = log.agent_name === "job_discovery" && (parsed as DiscoveryProgress)?.feeds;
+                const isEmailAgent    = (log.agent_name === "email_monitor" || log.agent_name === "job_email_scraper") && (parsed as EmailProgress)?.emails;
+                const isCompanyScraper = log.agent_name === "company_scraper" && (parsed as CompanyProgress)?.companies;
+
+                const statusBadge = (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    log.status === "completed" ? "bg-green-900/50 text-green-400" :
+                    log.status === "failed"    ? "bg-red-900/50 text-red-400" :
+                    log.status === "running"   ? "bg-blue-900/50 text-blue-400 animate-pulse" :
+                                                 "bg-yellow-900/50 text-yellow-400"
+                  }`}>{log.status}</span>
+                );
 
                 return (
                   <div key={log.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                    {/* Header row */}
-                    <div className="flex items-center justify-between mb-2">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          log.status === "completed" ? "bg-green-900/50 text-green-400" :
-                          log.status === "failed"    ? "bg-red-900/50 text-red-400" :
-                          log.status === "running"   ? "bg-blue-900/50 text-blue-400" :
-                                                       "bg-yellow-900/50 text-yellow-400"
-                        }`}>{log.status}</span>
+                        {statusBadge}
                         <span className="text-sm font-semibold capitalize">{log.agent_name.replace(/_/g, " ")}</span>
                       </div>
                       <span className="text-xs text-gray-500">{new Date(log.run_at).toLocaleString()}</span>
                     </div>
 
-                    {/* Job discovery: structured breakdown */}
-                    {isJobDiscovery && parsedSummary ? (
-                      <div>
-                        {/* Summary stats row */}
-                        <div className="flex flex-wrap gap-x-5 gap-y-1 mb-3 text-sm">
-                          <span className="text-gray-400">Feeds <span className="text-white font-semibold">{parsedSummary.completedFeeds}/{parsedSummary.totalFeeds}</span></span>
-                          <span className="text-gray-400">Scanned <span className="text-white font-semibold">{parsedSummary.totalFound}</span></span>
-                          <span className="text-gray-400">Saved <span className="text-green-400 font-semibold">{parsedSummary.totalSaved}</span></span>
-                          {parsedSummary.totalFound > 0 && (
-                            <span className="text-gray-400">Hit rate <span className="text-white font-semibold">{Math.round((parsedSummary.totalSaved / parsedSummary.totalFound) * 100)}%</span></span>
+                    {/* ── Job Discovery ── */}
+                    {isJobDiscovery && (() => {
+                      const p = parsed as DiscoveryProgress;
+                      const pct = p.totalFeeds > 0 ? Math.round((p.completedFeeds / p.totalFeeds) * 100) : 0;
+                      const sourceOrder = ["indeed", "linkedin", "timesjobs", "weworkremotely", "remotive", "jobicy"];
+                      const grouped: Record<string, FeedProgress[]> = {};
+                      p.feeds.forEach(f => { if (!grouped[f.source]) grouped[f.source] = []; grouped[f.source].push(f); });
+                      const sourceLabels: Record<string, string> = {
+                        indeed: "Indeed India", linkedin: "LinkedIn", timesjobs: "TimesJobs",
+                        weworkremotely: "We Work Remotely", remotive: "Remotive", jobicy: "Jobicy",
+                      };
+                      return (
+                        <div>
+                          <div className="flex flex-wrap gap-x-5 gap-y-1 mb-2 text-sm">
+                            <span className="text-gray-400">Feeds <span className="text-white font-semibold">{p.completedFeeds}/{p.totalFeeds}</span></span>
+                            <span className="text-gray-400">Scanned <span className="text-white font-semibold">{p.totalFound}</span></span>
+                            <span className="text-gray-400">Saved <span className="text-green-400 font-semibold">{p.totalSaved}</span></span>
+                            {p.totalFound > 0 && <span className="text-gray-400">Hit rate <span className="text-white font-semibold">{Math.round((p.totalSaved / p.totalFound) * 100)}%</span></span>}
+                            {p.cancelled && <span className="text-yellow-400 text-xs px-2 py-0.5 bg-yellow-900/30 rounded-full">⚠ Cancelled</span>}
+                          </div>
+                          <div className="w-full bg-gray-800 rounded-full h-1.5 mb-3">
+                            <div className="bg-green-500 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                          <div className="space-y-1.5">
+                            {sourceOrder.filter(s => grouped[s]).map(src => {
+                              const feeds = grouped[src];
+                              const srcSaved = feeds.reduce((a, f) => a + f.saved, 0);
+                              const srcFound = feeds.reduce((a, f) => a + f.found, 0);
+                              return (
+                                <details key={src} open={srcSaved > 0}>
+                                  <summary className="flex items-center gap-2 cursor-pointer select-none list-none py-1.5 px-3 rounded-lg bg-gray-800">
+                                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${srcSaved > 0 ? "bg-green-400" : "bg-gray-600"}`} />
+                                    <span className={`text-sm font-medium flex-1 ${srcSaved > 0 ? "text-white" : "text-gray-400"}`}>{sourceLabels[src] || src}</span>
+                                    <span className="text-xs text-gray-500">{feeds.length} feed{feeds.length > 1 ? "s" : ""}</span>
+                                    {srcSaved > 0
+                                      ? <span className="text-xs font-semibold text-green-400 bg-green-900/40 px-2 py-0.5 rounded-full">{srcSaved} saved</span>
+                                      : <span className="text-xs text-gray-600 px-2 py-0.5">{srcFound} found · 0 saved</span>}
+                                    <span className="text-gray-600 text-xs">▾</span>
+                                  </summary>
+                                  <div className="mt-1 ml-3 space-y-0.5">
+                                    {feeds.map((feed, i) => (
+                                      <div key={i} className="flex items-center gap-2 text-xs py-1 px-3">
+                                        <span className={`flex-shrink-0 w-3 font-bold ${feed.status === "done" && feed.saved > 0 ? "text-green-400" : feed.status === "running" ? "text-blue-400" : "text-gray-600"}`}>
+                                          {feed.status === "done" ? "✓" : feed.status === "running" ? "▶" : "–"}
+                                        </span>
+                                        <span className={`flex-1 truncate ${feed.saved > 0 ? "text-gray-200" : feed.status === "done" ? "text-gray-500" : "text-gray-700"}`}>{feed.label.replace(/^[^—]+—\s*/, "")}</span>
+                                        {feed.status === "done" && (feed.saved > 0
+                                          ? <span className="text-green-400 font-semibold">{feed.saved} saved</span>
+                                          : <span className="text-gray-700">{feed.found} found</span>)}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* ── Company Scraper ── */}
+                    {isCompanyScraper && (() => {
+                      const p = parsed as CompanyProgress;
+                      const pct = p.totalCompanies > 0 ? Math.round((p.completedCompanies / p.totalCompanies) * 100) : 0;
+                      const categories = ["FAANG", "Big Tech", "Product", "Indian Unicorn", "MNC", "AI/ML", "Data & Infra"];
+                      const grouped: Record<string, CompanyResult[]> = {};
+                      p.companies.forEach(c => { if (!grouped[c.category]) grouped[c.category] = []; grouped[c.category].push(c); });
+                      const catColors: Record<string, string> = {
+                        "FAANG": "text-blue-400", "Big Tech": "text-purple-400", "Product": "text-cyan-400",
+                        "Indian Unicorn": "text-orange-400", "MNC": "text-yellow-400",
+                        "AI/ML": "text-emerald-400", "Data & Infra": "text-pink-400",
+                      };
+                      return (
+                        <div>
+                          <div className="flex flex-wrap gap-x-5 gap-y-1 mb-2 text-sm">
+                            <span className="text-gray-400">Companies <span className="text-white font-semibold">{p.completedCompanies}/{p.totalCompanies}</span></span>
+                            <span className="text-gray-400">Found <span className="text-white font-semibold">{p.totalFound}</span></span>
+                            <span className="text-gray-400">Saved <span className="text-green-400 font-semibold">{p.totalSaved}</span></span>
+                            {p.currentCompany && p.currentCompany !== "Done" && <span className="text-gray-500 text-xs">→ {p.currentCompany}</span>}
+                            {p.cancelled && <span className="text-yellow-400 text-xs px-2 py-0.5 bg-yellow-900/30 rounded-full">⚠ Cancelled</span>}
+                          </div>
+                          <div className="w-full bg-gray-800 rounded-full h-1.5 mb-3">
+                            <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                          <div className="space-y-1.5">
+                            {categories.filter(cat => grouped[cat]).map(cat => {
+                              const companies = grouped[cat];
+                              const catSaved = companies.reduce((a, c) => a + c.saved, 0);
+                              const catDone  = companies.filter(c => c.status === "done").length;
+                              const catFail  = companies.filter(c => c.status === "failed").length;
+                              return (
+                                <details key={cat} open={catSaved > 0 || catFail > 0}>
+                                  <summary className="flex items-center gap-2 cursor-pointer select-none list-none py-1.5 px-3 rounded-lg bg-gray-800">
+                                    <span className={`text-xs font-bold w-3 ${catColors[cat] || "text-gray-400"}`}>●</span>
+                                    <span className={`text-sm font-medium flex-1 ${catColors[cat] || "text-gray-300"}`}>{cat}</span>
+                                    <span className="text-xs text-gray-500">{catDone}/{companies.length} done</span>
+                                    {catFail > 0 && <span className="text-xs text-red-400 bg-red-900/30 px-2 py-0.5 rounded-full">{catFail} failed</span>}
+                                    {catSaved > 0 && <span className="text-xs font-semibold text-green-400 bg-green-900/40 px-2 py-0.5 rounded-full">{catSaved} saved</span>}
+                                    <span className="text-gray-600 text-xs">▾</span>
+                                  </summary>
+                                  <div className="mt-1 ml-3 grid grid-cols-2 md:grid-cols-3 gap-0.5">
+                                    {companies.map((co) => (
+                                      <div key={co.slug} className={`flex items-center gap-1.5 text-xs py-1 px-2 rounded ${co.status === "running" ? "bg-blue-900/20" : ""}`}>
+                                        <span className={`flex-shrink-0 w-3 font-bold ${
+                                          co.status === "done" && co.saved > 0 ? "text-green-400" :
+                                          co.status === "done"    ? "text-gray-600" :
+                                          co.status === "failed"  ? "text-red-400" :
+                                          co.status === "running" ? "text-blue-400" : "text-gray-700"
+                                        }`}>
+                                          {co.status === "done" ? "✓" : co.status === "failed" ? "✗" : co.status === "running" ? "▶" : co.status === "skipped" ? "–" : "·"}
+                                        </span>
+                                        <span className={`flex-1 truncate ${
+                                          co.saved > 0      ? "text-gray-200" :
+                                          co.status === "done"   ? "text-gray-500" :
+                                          co.status === "failed" ? "text-red-400" :
+                                          co.status === "pending"? "text-gray-700" : "text-gray-400"
+                                        }`} title={co.error}>{co.name}</span>
+                                        {co.saved > 0 && <span className="text-green-400 font-semibold flex-shrink-0">{co.saved}</span>}
+                                        {co.status === "failed" && co.error && <span className="text-red-500 text-xs flex-shrink-0 truncate max-w-[80px]" title={co.error}>{co.error.replace("HTTP ", "")}</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </details>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* ── Email Agents ── */}
+                    {isEmailAgent && (() => {
+                      const p = parsed as EmailProgress;
+                      const pct = p.totalEmails > 0 ? Math.round((p.processedEmails / p.totalEmails) * 100) : 0;
+                      const realEmails = p.emails.filter(e => e.subject !== "(already processed)");
+                      const skipped = p.emails.length - realEmails.length;
+                      return (
+                        <div>
+                          <div className="flex flex-wrap gap-x-5 gap-y-1 mb-2 text-sm">
+                            <span className="text-gray-400">Emails <span className="text-white font-semibold">{p.processedEmails}/{p.totalEmails}</span></span>
+                            <span className="text-gray-400">LinkedIn <span className="text-blue-400 font-semibold">{p.linkedinEmails}</span></span>
+                            <span className="text-gray-400">Naukri <span className="text-orange-400 font-semibold">{p.naukriEmails}</span></span>
+                            <span className="text-gray-400">Jobs saved <span className="text-green-400 font-semibold">{p.totalJobsSaved}</span></span>
+                            {skipped > 0 && <span className="text-gray-600 text-xs">{skipped} already processed</span>}
+                            {p.cancelled && <span className="text-yellow-400 text-xs px-2 py-0.5 bg-yellow-900/30 rounded-full">⚠ Cancelled</span>}
+                          </div>
+                          <div className="w-full bg-gray-800 rounded-full h-1.5 mb-3">
+                            <div className="bg-purple-500 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                          {realEmails.length > 0 && (
+                            <details open={realEmails.some(e => e.saved > 0)}>
+                              <summary className="flex items-center gap-2 cursor-pointer select-none list-none py-1.5 px-3 rounded-lg bg-gray-800 mb-1">
+                                <span className="text-sm font-medium text-gray-300 flex-1">Processed emails ({realEmails.length})</span>
+                                {p.totalJobsSaved > 0 && <span className="text-xs font-semibold text-green-400 bg-green-900/40 px-2 py-0.5 rounded-full">{p.totalJobsSaved} jobs saved</span>}
+                                <span className="text-gray-600 text-xs">▾</span>
+                              </summary>
+                              <div className="space-y-0.5 ml-3">
+                                {realEmails.map((email, i) => (
+                                  <div key={i} className="flex items-center gap-2 text-xs py-1 px-2 rounded">
+                                    <span className={`flex-shrink-0 w-3 font-bold ${
+                                      email.status === "done" && email.saved > 0 ? "text-green-400" :
+                                      email.status === "done"    ? "text-gray-600" :
+                                      email.status === "running" ? "text-blue-400" :
+                                      email.status === "skipped" ? "text-gray-700" : "text-gray-700"
+                                    }`}>
+                                      {email.status === "done" ? "✓" : email.status === "running" ? "▶" : "–"}
+                                    </span>
+                                    <span className={`flex-shrink-0 text-xs font-medium px-1.5 py-0.5 rounded ${
+                                      email.type === "linkedin" ? "bg-blue-900/40 text-blue-400" :
+                                      email.type === "naukri"   ? "bg-orange-900/40 text-orange-400" :
+                                                                   "bg-gray-800 text-gray-500"
+                                    }`}>{email.type === "linkedin" ? "LI" : email.type === "naukri" ? "NK" : "—"}</span>
+                                    <span className={`flex-1 truncate ${email.saved > 0 ? "text-gray-200" : email.status === "done" ? "text-gray-500" : "text-gray-700"}`}>{email.subject.slice(0, 60)}</span>
+                                    {email.status === "done" && email.extracted > 0 && (
+                                      email.saved > 0
+                                        ? <span className="text-green-400 font-semibold flex-shrink-0">{email.saved} saved</span>
+                                        : <span className="text-gray-600 flex-shrink-0">{email.extracted} found · 0 new</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </details>
                           )}
-                          {parsedSummary.cancelled && <span className="text-yellow-400 text-xs font-medium px-2 py-0.5 bg-yellow-900/30 rounded-full">⚠ Cancelled</span>}
                         </div>
+                      );
+                    })()}
 
-                        {/* Progress bar */}
-                        <div className="w-full bg-gray-800 rounded-full h-1.5 mb-4">
-                          <div className="bg-green-500 h-1.5 rounded-full transition-all" style={{ width: `${Math.round((parsedSummary.completedFeeds / parsedSummary.totalFeeds) * 100)}%` }} />
-                        </div>
-
-                        {/* Grouped by source */}
-                        {(() => {
-                          const sourceOrder = ["indeed", "linkedin", "timesjobs", "weworkremotely", "remotive", "jobicy"];
-                          const grouped: Record<string, FeedProgress[]> = {};
-                          parsedSummary.feeds.forEach(f => {
-                            if (!grouped[f.source]) grouped[f.source] = [];
-                            grouped[f.source].push(f);
-                          });
-                          const sourceLabels: Record<string, string> = {
-                            indeed: "Indeed India", linkedin: "LinkedIn", timesjobs: "TimesJobs",
-                            weworkremotely: "We Work Remotely", remotive: "Remotive", jobicy: "Jobicy",
-                          };
-                          return (
-                            <div className="space-y-2">
-                              {sourceOrder.filter(s => grouped[s]).map(src => {
-                                const feeds = grouped[src];
-                                const srcSaved = feeds.reduce((a, f) => a + f.saved, 0);
-                                const srcFound = feeds.reduce((a, f) => a + f.found, 0);
-                                const hasResults = srcSaved > 0;
-                                return (
-                                  <details key={src} open={hasResults}>
-                                    <summary className="flex items-center gap-2 cursor-pointer select-none list-none py-1.5 px-3 rounded-lg bg-gray-800 hover:bg-gray-750">
-                                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${hasResults ? "bg-green-400" : "bg-gray-600"}`} />
-                                      <span className={`text-sm font-medium flex-1 ${hasResults ? "text-white" : "text-gray-400"}`}>{sourceLabels[src] || src}</span>
-                                      <span className="text-xs text-gray-500">{feeds.length} feed{feeds.length > 1 ? "s" : ""}</span>
-                                      {hasResults
-                                        ? <span className="text-xs font-semibold text-green-400 bg-green-900/40 px-2 py-0.5 rounded-full">{srcSaved} saved</span>
-                                        : <span className="text-xs text-gray-600 bg-gray-900 px-2 py-0.5 rounded-full">{srcFound} found · 0 saved</span>
-                                      }
-                                      <span className="text-gray-600 text-xs ml-1">▾</span>
-                                    </summary>
-                                    <div className="mt-1 ml-3 space-y-0.5">
-                                      {feeds.map((feed, i) => (
-                                        <div key={i} className="flex items-center gap-2 text-xs py-1 px-3 rounded">
-                                          <span className={`flex-shrink-0 font-bold ${
-                                            feed.status === "done" && feed.saved > 0 ? "text-green-400" :
-                                            feed.status === "done"    ? "text-gray-600" :
-                                            feed.status === "running" ? "text-blue-400" :
-                                            feed.status === "skipped" ? "text-gray-700" : "text-gray-700"
-                                          }`}>
-                                            {feed.status === "done" ? "✓" : feed.status === "running" ? "▶" : feed.status === "skipped" ? "–" : "·"}
-                                          </span>
-                                          {/* Strip source prefix from label for cleaner display */}
-                                          <span className={`flex-1 truncate ${
-                                            feed.saved > 0       ? "text-gray-200" :
-                                            feed.status === "done"    ? "text-gray-500" :
-                                            feed.status === "skipped" ? "text-gray-700" : "text-gray-500"
-                                          }`}>{feed.label.replace(/^[^—]+—\s*/, "")}</span>
-                                          {feed.status === "done" && (
-                                            feed.saved > 0
-                                              ? <span className="text-green-400 font-semibold">{feed.saved} saved</span>
-                                              : <span className="text-gray-700">{feed.found} found</span>
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </details>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    ) : (
-                      /* Other agents: plain summary */
-                      <p className="text-sm text-gray-400">{log.summary || "—"}</p>
-                    )}
-
-                    {/* Stats row for non-job-discovery */}
-                    {!isJobDiscovery && (log.jobs_found > 0 || log.actions_taken > 0) && (
-                      <div className="flex gap-4 mt-2 text-xs text-gray-500">
-                        {log.jobs_found > 0 && <span>Jobs found: <span className="text-white">{log.jobs_found}</span></span>}
-                        {log.actions_taken > 0 && <span>Actions: <span className="text-white">{log.actions_taken}</span></span>}
-                      </div>
+                    {/* ── Fallback: plain text ── */}
+                    {!isJobDiscovery && !isEmailAgent && !isCompanyScraper && (
+                      <p className="text-sm text-gray-400">{
+                        typeof log.summary === "string" && !log.summary.startsWith("{")
+                          ? log.summary
+                          : `Jobs: ${log.jobs_found ?? 0} · Actions: ${log.actions_taken ?? 0}`
+                      }</p>
                     )}
                   </div>
                 );
