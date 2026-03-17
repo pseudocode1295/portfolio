@@ -443,17 +443,87 @@ export default function AdminDashboard() {
         {activeTab === "logs" && (
           <div>
             <h2 className="text-lg font-semibold mb-4">Agent Logs</h2>
-            <div className="space-y-2">
-              {(data?.recentLogs || []).map((log) => (
-                <div key={log.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full mr-2 ${log.status === "completed" ? "bg-green-900/50 text-green-400" : log.status === "failed" ? "bg-red-900/50 text-red-400" : "bg-yellow-900/50 text-yellow-400"}`}>{log.status}</span>
-                    <span className="text-sm font-medium">{log.agent_name.replace("_", " ")}</span>
-                    <span className="text-xs text-gray-500 ml-3">{log.summary}</span>
+            <div className="space-y-3">
+              {(data?.recentLogs || []).map((log) => {
+                // Try to parse JSON summary (job_discovery stores progress JSON)
+                let parsedSummary: DiscoveryProgress | null = null;
+                try { parsedSummary = JSON.parse(log.summary); } catch { /* plain text */ }
+                const isJobDiscovery = log.agent_name === "job_discovery" && parsedSummary?.feeds;
+
+                return (
+                  <div key={log.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                    {/* Header row */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          log.status === "completed" ? "bg-green-900/50 text-green-400" :
+                          log.status === "failed"    ? "bg-red-900/50 text-red-400" :
+                          log.status === "running"   ? "bg-blue-900/50 text-blue-400" :
+                                                       "bg-yellow-900/50 text-yellow-400"
+                        }`}>{log.status}</span>
+                        <span className="text-sm font-semibold capitalize">{log.agent_name.replace(/_/g, " ")}</span>
+                      </div>
+                      <span className="text-xs text-gray-500">{new Date(log.run_at).toLocaleString()}</span>
+                    </div>
+
+                    {/* Job discovery: structured breakdown */}
+                    {isJobDiscovery && parsedSummary ? (
+                      <div>
+                        {/* Summary stats */}
+                        <div className="flex gap-4 mb-3 text-sm">
+                          <span className="text-gray-400">Feeds: <span className="text-white font-medium">{parsedSummary.completedFeeds}/{parsedSummary.totalFeeds}</span></span>
+                          <span className="text-gray-400">Found: <span className="text-white font-medium">{parsedSummary.totalFound}</span></span>
+                          <span className="text-gray-400">Saved: <span className="text-green-400 font-medium">{parsedSummary.totalSaved}</span></span>
+                          {parsedSummary.cancelled && <span className="text-yellow-400 text-xs">⚠ Cancelled early</span>}
+                        </div>
+                        {/* Progress bar */}
+                        <div className="w-full bg-gray-800 rounded-full h-1.5 mb-3">
+                          <div
+                            className="bg-green-500 h-1.5 rounded-full"
+                            style={{ width: `${Math.round((parsedSummary.completedFeeds / parsedSummary.totalFeeds) * 100)}%` }}
+                          />
+                        </div>
+                        {/* Feed breakdown — 2 column grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-1">
+                          {parsedSummary.feeds.map((feed, i) => (
+                            <div key={i} className="flex items-center gap-2 text-xs py-1 px-2 rounded bg-gray-800">
+                              <span className={`flex-shrink-0 w-3 text-center font-bold ${
+                                feed.status === "done"    ? "text-green-400" :
+                                feed.status === "running" ? "text-blue-400" :
+                                feed.status === "skipped" ? "text-gray-600" : "text-gray-600"
+                              }`}>
+                                {feed.status === "done" ? "✓" : feed.status === "running" ? "▶" : feed.status === "skipped" ? "–" : "·"}
+                              </span>
+                              <span className={`flex-1 truncate ${
+                                feed.status === "done"    ? "text-gray-300" :
+                                feed.status === "running" ? "text-blue-300 font-medium" :
+                                feed.status === "skipped" ? "text-gray-600" : "text-gray-500"
+                              }`}>{feed.label}</span>
+                              {feed.status === "done" && feed.saved > 0 && (
+                                <span className="text-green-400 font-medium">{feed.saved}</span>
+                              )}
+                              {feed.status === "done" && feed.saved === 0 && (
+                                <span className="text-gray-600">0</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      /* Other agents: plain summary */
+                      <p className="text-sm text-gray-400">{log.summary || "—"}</p>
+                    )}
+
+                    {/* Stats row for non-job-discovery */}
+                    {!isJobDiscovery && (log.jobs_found > 0 || log.actions_taken > 0) && (
+                      <div className="flex gap-4 mt-2 text-xs text-gray-500">
+                        {log.jobs_found > 0 && <span>Jobs found: <span className="text-white">{log.jobs_found}</span></span>}
+                        {log.actions_taken > 0 && <span>Actions: <span className="text-white">{log.actions_taken}</span></span>}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-xs text-gray-500">{new Date(log.run_at).toLocaleString()}</div>
-                </div>
-              ))}
+                );
+              })}
               {!data?.recentLogs?.length && <p className="text-gray-500 text-center py-8">No agent runs yet.</p>}
             </div>
           </div>
