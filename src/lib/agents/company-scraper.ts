@@ -10,7 +10,7 @@ export interface CompanyConfig {
   name: string;
   slug: string;
   category: CompanyCategory;
-  scrapeType: "greenhouse" | "lever" | "google" | "amazon" | "apple" | "microsoft";
+  scrapeType: "greenhouse" | "lever" | "ashby" | "google" | "amazon" | "apple" | "microsoft";
   boardId?: string;   // greenhouse board ID
   companyId?: string; // lever company slug
 }
@@ -38,57 +38,53 @@ export interface CompanyProgress {
 // ─── Company List ─────────────────────────────────────────────────────────────
 
 export const COMPANIES: CompanyConfig[] = [
-  // ── FAANG (6) ──────────────────────────────────────────────────────────────
+  // ── FAANG (5) ──────────────────────────────────────────────────────────────
   { name: "Google",    slug: "google",    category: "FAANG", scrapeType: "google" },
   { name: "Amazon",    slug: "amazon",    category: "FAANG", scrapeType: "amazon" },
   { name: "Apple",     slug: "apple",     category: "FAANG", scrapeType: "apple" },
   { name: "Microsoft", slug: "microsoft", category: "FAANG", scrapeType: "microsoft" },
-  { name: "Meta",      slug: "meta",      category: "FAANG", scrapeType: "greenhouse", boardId: "meta" },
-  { name: "Netflix",   slug: "netflix",   category: "FAANG", scrapeType: "lever",      companyId: "netflix" },
+  // Meta uses its own portal (not Greenhouse); Netflix uses Workday — both removed
+  { name: "Uber",      slug: "uber",      category: "FAANG", scrapeType: "greenhouse", boardId: "uberfreight" }, // verified
 
-  // ── Big Tech (14) ─────────────────────────────────────────────────────────
-  { name: "Uber",        slug: "uber",        category: "Big Tech", scrapeType: "greenhouse", boardId: "uber" },
+  // ── Big Tech (10) ─────────────────────────────────────────────────────────
   { name: "Airbnb",      slug: "airbnb",      category: "Big Tech", scrapeType: "greenhouse", boardId: "airbnb" },
-  { name: "Adobe",       slug: "adobe",       category: "Big Tech", scrapeType: "greenhouse", boardId: "adobe" },
-  { name: "Atlassian",   slug: "atlassian",   category: "Big Tech", scrapeType: "greenhouse", boardId: "atlassian" },
-  { name: "Salesforce",  slug: "salesforce",  category: "Big Tech", scrapeType: "greenhouse", boardId: "salesforce" },
   { name: "LinkedIn",    slug: "linkedin",    category: "Big Tech", scrapeType: "greenhouse", boardId: "linkedin" },
-  { name: "Snap",        slug: "snap",        category: "Big Tech", scrapeType: "greenhouse", boardId: "snap" },
   { name: "Pinterest",   slug: "pinterest",   category: "Big Tech", scrapeType: "greenhouse", boardId: "pinterest" },
   { name: "Lyft",        slug: "lyft",        category: "Big Tech", scrapeType: "greenhouse", boardId: "lyft" },
-  { name: "DoorDash",    slug: "doordash",    category: "Big Tech", scrapeType: "greenhouse", boardId: "doordash" },
-  { name: "Shopify",     slug: "shopify",     category: "Big Tech", scrapeType: "greenhouse", boardId: "shopify" },
-  { name: "Twitter / X", slug: "twitter",    category: "Big Tech", scrapeType: "greenhouse", boardId: "twitter" },
+  { name: "DoorDash",    slug: "doordash",    category: "Big Tech", scrapeType: "greenhouse", boardId: "doordashusa" }, // verified
   { name: "Palantir",    slug: "palantir",    category: "Big Tech", scrapeType: "lever",      companyId: "palantir" },
   { name: "Instacart",   slug: "instacart",   category: "Big Tech", scrapeType: "greenhouse", boardId: "instacart" },
+  { name: "Reddit",      slug: "reddit",      category: "Big Tech", scrapeType: "greenhouse", boardId: "reddit" },
+  { name: "Discord",     slug: "discord",     category: "Big Tech", scrapeType: "greenhouse", boardId: "discord" },
+  { name: "Duolingo",    slug: "duolingo",    category: "Big Tech", scrapeType: "greenhouse", boardId: "duolingo" },
+  // Adobe/Atlassian/Salesforce/Snap/Shopify/Twitter/X/Zoom use Workday or custom ATS — removed
 
-  // ── Product Companies (26) ────────────────────────────────────────────────
-  { name: "Stripe",        slug: "stripe",       category: "Product", scrapeType: "greenhouse", boardId: "stripe" },
-  { name: "Figma",         slug: "figma",         category: "Product", scrapeType: "greenhouse", boardId: "figma" },
-  { name: "Notion",        slug: "notion",        category: "Product", scrapeType: "greenhouse", boardId: "notion" },
-  { name: "Canva",         slug: "canva",         category: "Product", scrapeType: "greenhouse", boardId: "canva" },
-  { name: "Dropbox",       slug: "dropbox",       category: "Product", scrapeType: "greenhouse", boardId: "dropbox" },
-  { name: "Grammarly",     slug: "grammarly",     category: "Product", scrapeType: "greenhouse", boardId: "grammarly" },
-  { name: "Twilio",        slug: "twilio",        category: "Product", scrapeType: "greenhouse", boardId: "twilio" },
-  { name: "Zendesk",       slug: "zendesk",       category: "Product", scrapeType: "greenhouse", boardId: "zendesk" },
-  { name: "Rippling",      slug: "rippling",      category: "Product", scrapeType: "greenhouse", boardId: "rippling" },
-  { name: "Postman",       slug: "postman",       category: "Product", scrapeType: "greenhouse", boardId: "postmanlabs" },
-  { name: "BrowserStack",  slug: "browserstack",  category: "Product", scrapeType: "greenhouse", boardId: "browserstack" },
-  { name: "Intuit",        slug: "intuit",        category: "Product", scrapeType: "greenhouse", boardId: "intuit" },
-  { name: "Gong",          slug: "gong",          category: "Product", scrapeType: "greenhouse", boardId: "gong" },
-  { name: "Twitch",        slug: "twitch",        category: "Product", scrapeType: "greenhouse", boardId: "twitch" },
-  { name: "Zoom",          slug: "zoom",          category: "Product", scrapeType: "greenhouse", boardId: "zoom" },
-  { name: "HubSpot",       slug: "hubspot",       category: "Product", scrapeType: "greenhouse", boardId: "hubspot" },
-  { name: "Datadog",       slug: "datadog",       category: "Product", scrapeType: "greenhouse", boardId: "datadoghq" },
-  { name: "Cloudflare",    slug: "cloudflare",    category: "Product", scrapeType: "greenhouse", boardId: "cloudflare" },
-  { name: "Coinbase",      slug: "coinbase",      category: "Product", scrapeType: "greenhouse", boardId: "coinbase" },
-  { name: "Airtable",      slug: "airtable",      category: "Product", scrapeType: "greenhouse", boardId: "airtable" },
-  { name: "Asana",         slug: "asana",         category: "Product", scrapeType: "greenhouse", boardId: "asana" },
-  { name: "Miro",          slug: "miro",          category: "Product", scrapeType: "greenhouse", boardId: "miro" },
-  { name: "Loom",          slug: "loom",          category: "Product", scrapeType: "greenhouse", boardId: "loom" },
-  { name: "Robinhood",     slug: "robinhood",     category: "Product", scrapeType: "greenhouse", boardId: "robinhood" },
-  { name: "Plaid",         slug: "plaid",         category: "Product", scrapeType: "greenhouse", boardId: "plaid" },
-  { name: "Brex",          slug: "brex",          category: "Product", scrapeType: "greenhouse", boardId: "brex" },
+  // ── Product Companies (24) ────────────────────────────────────────────────
+  { name: "Stripe",      slug: "stripe",      category: "Product", scrapeType: "greenhouse", boardId: "stripe" },
+  { name: "Figma",       slug: "figma",       category: "Product", scrapeType: "greenhouse", boardId: "figma" },
+  { name: "Notion",      slug: "notion",      category: "Product", scrapeType: "ashby",      boardId: "notion" }, // uses Ashby
+  { name: "Dropbox",     slug: "dropbox",     category: "Product", scrapeType: "greenhouse", boardId: "dropbox" },
+  { name: "Grammarly",   slug: "grammarly",   category: "Product", scrapeType: "greenhouse", boardId: "grammarly" },
+  { name: "Twilio",      slug: "twilio",      category: "Product", scrapeType: "greenhouse", boardId: "twilio" },
+  { name: "Postman",     slug: "postman",     category: "Product", scrapeType: "greenhouse", boardId: "postman" }, // verified (was postmanlabs)
+  { name: "Gong",        slug: "gong",        category: "Product", scrapeType: "greenhouse", boardId: "gongio" }, // verified
+  { name: "Twitch",      slug: "twitch",      category: "Product", scrapeType: "greenhouse", boardId: "twitch" },
+  { name: "HubSpot",     slug: "hubspot",     category: "Product", scrapeType: "greenhouse", boardId: "hubspot" },
+  { name: "Datadog",     slug: "datadog",     category: "Product", scrapeType: "greenhouse", boardId: "datadog" }, // verified (was datadoghq)
+  { name: "Cloudflare",  slug: "cloudflare",  category: "Product", scrapeType: "greenhouse", boardId: "cloudflare" },
+  { name: "Coinbase",    slug: "coinbase",    category: "Product", scrapeType: "greenhouse", boardId: "coinbase" },
+  { name: "Airtable",    slug: "airtable",    category: "Product", scrapeType: "greenhouse", boardId: "airtable" },
+  { name: "Asana",       slug: "asana",       category: "Product", scrapeType: "greenhouse", boardId: "asana" },
+  { name: "Miro",        slug: "miro",        category: "Product", scrapeType: "greenhouse", boardId: "realtimeboardglobal" }, // verified
+  { name: "Robinhood",   slug: "robinhood",   category: "Product", scrapeType: "greenhouse", boardId: "robinhood" },
+  { name: "Plaid",       slug: "plaid",       category: "Product", scrapeType: "lever",      companyId: "plaid" }, // verified on Lever
+  { name: "Brex",        slug: "brex",        category: "Product", scrapeType: "greenhouse", boardId: "brex" }, // verified
+  { name: "Linear",      slug: "linear",      category: "Product", scrapeType: "ashby",      boardId: "linear" }, // Ashby
+  { name: "Ramp",        slug: "ramp",        category: "Product", scrapeType: "ashby",      boardId: "ramp" }, // Ashby
+  { name: "Deel",        slug: "deel",        category: "Product", scrapeType: "lever",      companyId: "deel" },
+  { name: "Box",         slug: "box",         category: "Product", scrapeType: "greenhouse", boardId: "box" },
+  { name: "Intercom",    slug: "intercom",    category: "Product", scrapeType: "greenhouse", boardId: "intercom" },
+  // Canva/Zendesk/Rippling/BrowserStack/Intuit/Zoom/Loom use Workday or custom ATS — removed
 
   // ── Indian Unicorns & Startups (22) ───────────────────────────────────────
   { name: "Razorpay",      slug: "razorpay",      category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "razorpay" },
@@ -285,6 +281,37 @@ async function scrapeLever(config: CompanyConfig): Promise<{ found: number; save
   return { found, saved };
 }
 
+// ─── Ashby ────────────────────────────────────────────────────────────────────
+
+interface AshbyJob {
+  title: string;
+  locationName?: string;
+  jobUrl: string;
+  departmentName?: string;
+}
+
+async function scrapeAshby(config: CompanyConfig): Promise<{ found: number; saved: number }> {
+  const res = await fetchWithTimeout(
+    `https://api.ashbyhq.com/posting-api/job-board/${config.boardId}?includeCompensation=false`,
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data = await res.json();
+  const jobs: AshbyJob[] = data.jobPostings || data.jobs || [];
+  let found = 0, saved = 0;
+
+  for (const job of jobs) {
+    const title = job.title || "";
+    const location = job.locationName || "";
+    if (!isMlRelevant(title)) continue;
+    if (location && !isLocationAllowed(location)) continue;
+    found++;
+    const dept = job.departmentName || "Engineering";
+    if (await saveJob(config, title, location || "Remote", job.jobUrl, `${config.name} · ${dept}`)) saved++;
+  }
+  return { found, saved };
+}
+
 // ─── Google Careers ───────────────────────────────────────────────────────────
 
 async function scrapeGoogle(config: CompanyConfig): Promise<{ found: number; saved: number }> {
@@ -464,6 +491,7 @@ export async function runCompanyScraperAgent(): Promise<AgentResult> {
         switch (company.scrapeType) {
           case "greenhouse": r = await scrapeGreenhouse(company); break;
           case "lever":      r = await scrapeLever(company);      break;
+          case "ashby":      r = await scrapeAshby(company);      break;
           case "google":     r = await scrapeGoogle(company);     break;
           case "amazon":     r = await scrapeAmazon(company);     break;
           case "apple":      r = await scrapeApple(company);      break;
