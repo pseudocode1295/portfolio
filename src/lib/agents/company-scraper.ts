@@ -10,9 +10,10 @@ export interface CompanyConfig {
   name: string;
   slug: string;
   category: CompanyCategory;
-  scrapeType: "greenhouse" | "lever" | "ashby" | "google" | "amazon" | "apple" | "microsoft";
-  boardId?: string;   // greenhouse board ID
-  companyId?: string; // lever company slug
+  scrapeType: "greenhouse" | "lever" | "ashby" | "web" | "google" | "amazon" | "apple" | "microsoft";
+  boardId?: string;    // greenhouse / ashby board ID
+  companyId?: string;  // lever company slug
+  careersUrl?: string; // web scraper: ML-filtered careers page URL
 }
 
 export interface CompanyResult {
@@ -149,17 +150,31 @@ export const COMPANIES: CompanyConfig[] = [
   { name: "Airbyte",     slug: "airbyte",     category: "Data & Infra", scrapeType: "greenhouse", boardId: "airbyte" },
 
   // ── Analytics & Consulting ────────────────────────────────────────────────
-  // Note: PwC/Deloitte/Accenture/Fractal/Nagarro/Tiger use Workday/Oracle/custom — no public API
-  { name: "Sigmoid",          slug: "sigmoid",      category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "sigmoid" },        // verified ✓
-  { name: "DataRobot",        slug: "datarobot",    category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "datarobot" },
-  { name: "C3.ai",            slug: "c3ai",         category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "c3ai" },
-  { name: "H2O.ai",           slug: "h2oai",        category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "h2oai" },
-  { name: "Alteryx",          slug: "alteryx",      category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "alteryx" },
-  { name: "ThoughtSpot",      slug: "thoughtspot",  category: "Analytics & Consulting", scrapeType: "lever",      companyId: "thoughtspot" },
-  { name: "Mu Sigma",         slug: "musigma",      category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "musigma" },
-  { name: "Quantiphi",        slug: "quantiphi",    category: "Analytics & Consulting", scrapeType: "lever",      companyId: "quantiphi" },
-  { name: "Fractal Analytics",slug: "fractal",      category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "fractalanalytics" },
-  { name: "Tiger Analytics",  slug: "tigeranalytics",category:"Analytics & Consulting", scrapeType: "greenhouse", boardId: "tigeranalytics" },
+  // Public-API companies
+  { name: "Sigmoid",    slug: "sigmoid",    category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "sigmoid" }, // verified ✓
+  { name: "DataRobot",  slug: "datarobot",  category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "datarobot" },
+  { name: "H2O.ai",     slug: "h2oai",      category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "h2oai" },
+  { name: "Alteryx",    slug: "alteryx",    category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "alteryx" },
+  { name: "Quantiphi",  slug: "quantiphi",  category: "Analytics & Consulting", scrapeType: "lever",      companyId: "quantiphi" },
+  // Web-scraped (Workday / custom portal — no public API)
+  { name: "Fractal Analytics", slug: "fractal",       category: "Analytics & Consulting", scrapeType: "web",
+    careersUrl: "https://fractal.ai/careers/?s=machine+learning" },
+  { name: "Nagarro",           slug: "nagarro",       category: "Analytics & Consulting", scrapeType: "web",
+    careersUrl: "https://www.nagarro.com/en/careers/open-positions" },
+  { name: "Tiger Analytics",   slug: "tigeranalytics",category: "Analytics & Consulting", scrapeType: "web",
+    careersUrl: "https://www.tigeranalytics.com/careers/" },
+  { name: "PwC India",         slug: "pwc",           category: "Analytics & Consulting", scrapeType: "web",
+    careersUrl: "https://jobs.pwc.com/India/search?q=machine+learning&sortColumn=referencedate&sortDirection=desc" },
+  { name: "Deloitte India",    slug: "deloitte",      category: "Analytics & Consulting", scrapeType: "web",
+    careersUrl: "https://jobs.deloitte.com/india/search-jobs/machine-learning/222/1" },
+  { name: "Accenture India",   slug: "accenture",     category: "Analytics & Consulting", scrapeType: "web",
+    careersUrl: "https://www.accenture.com/in-en/careers/jobsearch?jk=machine+learning&sb=1&vw=0&is_rj=0&pg=1" },
+  { name: "Capgemini India",   slug: "capgemini",     category: "Analytics & Consulting", scrapeType: "web",
+    careersUrl: "https://www.capgemini.com/in-en/careers/job-search/?search_term=machine+learning" },
+  { name: "EXL Service",       slug: "exl",           category: "Analytics & Consulting", scrapeType: "web",
+    careersUrl: "https://jobs.exlservice.com/job-search-results/?keyword=machine+learning&location=India" },
+  { name: "ZS Associates",     slug: "zs",            category: "Analytics & Consulting", scrapeType: "web",
+    careersUrl: "https://www.zs.com/careers/find-a-job?jobfunction=Advanced%20Analytics%20%26%20Insights&location=India" },
 ];
 
 // ─── ML/AI Relevance ──────────────────────────────────────────────────────────
@@ -323,6 +338,89 @@ async function scrapeAshby(config: CompanyConfig): Promise<{ found: number; save
     if (await saveJob(config, title, location || "Remote", job.jobUrl, `${config.name} · ${dept}`)) saved++;
   }
   return { found, saved };
+}
+
+// ─── Web Scraper (Playwright) ─────────────────────────────────────────────────
+// Used for companies with Workday/Oracle/custom portals that have no public API.
+// Navigates the ML-filtered careers page and extracts job listings.
+
+async function scrapeWebPage(config: CompanyConfig): Promise<{ found: number; saved: number }> {
+  if (!config.careersUrl) throw new Error("careersUrl required for web scraper");
+
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setExtraHTTPHeaders({
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      "Accept-Language": "en-US,en;q=0.9",
+    });
+
+    await page.goto(config.careersUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+    // Give JS-rendered pages time to populate
+    await page.waitForTimeout(4000);
+
+    // Extract all job-like links from the page
+    const rawJobs = await page.evaluate(() => {
+      const results: Array<{ title: string; location: string; url: string }> = [];
+      const seen = new Set<string>();
+
+      // Job URL patterns that indicate a job listing link
+      const JOB_URL = /\/(job|jobs|career|careers|position|positions|opening|role|vacancy|requisition|apply|jobdetail)\//i;
+      // Text to skip (nav items, buttons, etc.)
+      const SKIP = /^(home|about|contact|login|sign|menu|close|back|next|prev|load more|view all|see all|apply now|learn more|read more|submit|cookie|privacy|terms|\d+)$/i;
+
+      const links = Array.from(document.querySelectorAll("a[href]")) as HTMLAnchorElement[];
+
+      for (const link of links) {
+        const href = link.href;
+        const title = link.textContent?.trim().replace(/\s+/g, " ") ?? "";
+
+        if (!href || href === window.location.href || href.startsWith("javascript")) continue;
+        if (title.length < 5 || title.length > 150) continue;
+        if (SKIP.test(title)) continue;
+        if (seen.has(href)) continue;
+
+        // Must be in a job-related container OR have a job URL pattern
+        const inJobContainer = !!link.closest(
+          '[class*="job"], [class*="career"], [class*="position"], [class*="opening"], [class*="vacancy"], [class*="role"], [data-job], article, [class*="result"], [class*="listing"]'
+        );
+        if (!inJobContainer && !JOB_URL.test(href)) continue;
+
+        seen.add(href);
+
+        // Find location text in the parent card
+        const card = link.closest(
+          "li, tr, article, [class*='job'], [class*='card'], [class*='item'], [class*='row'], [class*='result'], [class*='listing']"
+        ) ?? link.parentElement;
+        const locEl = card?.querySelector(
+          '[class*="location"], [class*="city"], [class*="place"], [class*="office"], [class*="country"]'
+        );
+        const location = locEl?.textContent?.trim().replace(/\s+/g, " ") ?? "";
+
+        results.push({ title, location, url: href });
+      }
+
+      return results;
+    });
+
+    let found = 0, saved = 0;
+    for (const job of rawJobs) {
+      if (!isMlRelevant(job.title)) continue;
+      const loc = job.location || "India";
+      if (job.location && !isLocationAllowed(job.location)) continue;
+      found++;
+      if (await saveJob(config, job.title, loc, job.url, `${config.name} careers`)) saved++;
+    }
+
+    return { found, saved };
+  } finally {
+    await browser.close();
+  }
 }
 
 // ─── Google Careers ───────────────────────────────────────────────────────────
@@ -505,6 +603,7 @@ export async function runCompanyScraperAgent(): Promise<AgentResult> {
           case "greenhouse": r = await scrapeGreenhouse(company); break;
           case "lever":      r = await scrapeLever(company);      break;
           case "ashby":      r = await scrapeAshby(company);      break;
+          case "web":        r = await scrapeWebPage(company);    break;
           case "google":     r = await scrapeGoogle(company);     break;
           case "amazon":     r = await scrapeAmazon(company);     break;
           case "apple":      r = await scrapeApple(company);      break;

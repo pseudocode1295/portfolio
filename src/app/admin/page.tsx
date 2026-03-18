@@ -162,10 +162,13 @@ const COMPANY_CATEGORY: Record<string, string> = {
   hashicorp: "Data & Infra", gitlab: "Data & Infra", pagerduty: "Data & Infra", vercel: "Data & Infra",
   retool: "Data & Infra", airbyte: "Data & Infra",
   // Analytics & Consulting
-  sigmoid: "Analytics & Consulting", datarobot: "Analytics & Consulting", c3ai: "Analytics & Consulting",
-  h2oai: "Analytics & Consulting", alteryx: "Analytics & Consulting", thoughtspot: "Analytics & Consulting",
-  musigma: "Analytics & Consulting", quantiphi: "Analytics & Consulting",
-  fractal: "Analytics & Consulting", tigeranalytics: "Analytics & Consulting",
+  sigmoid: "Analytics & Consulting", datarobot: "Analytics & Consulting",
+  h2oai: "Analytics & Consulting", alteryx: "Analytics & Consulting",
+  quantiphi: "Analytics & Consulting", fractal: "Analytics & Consulting",
+  nagarro: "Analytics & Consulting", tigeranalytics: "Analytics & Consulting",
+  pwc: "Analytics & Consulting", deloitte: "Analytics & Consulting",
+  accenture: "Analytics & Consulting", capgemini: "Analytics & Consulting",
+  exl: "Analytics & Consulting", zs: "Analytics & Consulting",
 };
 
 function getCompanyCategory(source: string): string {
