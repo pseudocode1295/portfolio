@@ -220,6 +220,12 @@ export default function AdminDashboard() {
   const companyPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [companyJobs, setCompanyJobs] = useState<Job[]>([]);
   const [companyCategoryFilter, setCompanyCategoryFilter] = useState("All");
+  const [cronStatus, setCronStatus] = useState<{
+    live: boolean;
+    startedAt: string | null;
+    lastRuns: Record<string, string | null>;
+    schedules: Record<string, string>;
+  } | null>(null);
 
   const fetchData = useCallback(async () => {
     const res = await fetch("/api/admin/stats");
@@ -229,7 +235,15 @@ export default function AdminDashboard() {
     setLoading(false);
   }, [router]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const fetchCronStatus = useCallback(async () => {
+    const res = await fetch("/api/admin/cron-status");
+    if (res.ok) setCronStatus(await res.json());
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    fetchCronStatus();
+  }, [fetchData, fetchCronStatus]);
 
   const startProgressPolling = useCallback(() => {
     if (pollRef.current) return;
@@ -444,7 +458,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Agent Triggers */}
-      <div className="px-6 pb-4 flex gap-3 flex-wrap">
+      <div className="px-6 pb-3 flex gap-3 flex-wrap">
         {[
           { key: "job_discovery", label: "🔍 Run Job Discovery" },
           { key: "email_monitor", label: "📧 Check Emails" },
@@ -461,6 +475,44 @@ export default function AdminDashboard() {
           </button>
         ))}
       </div>
+
+      {/* Cron Status Bar */}
+      {cronStatus && (() => {
+        const ago = (iso: string | null) => {
+          if (!iso) return "never";
+          const diff = Date.now() - new Date(iso).getTime();
+          const m = Math.floor(diff / 60000);
+          if (m < 1) return "just now";
+          if (m < 60) return `${m}m ago`;
+          const h = Math.floor(m / 60);
+          return `${h}h ${m % 60}m ago`;
+        };
+        const items = [
+          { label: "Job Discovery", key: "job_discovery",   schedule: "every 2h", color: "text-blue-400" },
+          { label: "Email Scraper", key: "email_scraper",   schedule: "every 2h", color: "text-purple-400" },
+          { label: "Company Scraper", key: "company_scraper", schedule: "every 6h", color: "text-emerald-400" },
+        ];
+        return (
+          <div className="mx-6 mb-4 bg-gray-900/60 border border-gray-800 rounded-xl px-4 py-2.5 flex items-center gap-6 flex-wrap">
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cronStatus.live ? "bg-green-400 animate-pulse" : "bg-red-500"}`} />
+              <span className={`text-xs font-medium ${cronStatus.live ? "text-green-400" : "text-red-400"}`}>
+                {cronStatus.live ? "Auto-scan ON" : "Auto-scan OFF — restart server"}
+              </span>
+            </div>
+            <div className="w-px h-4 bg-gray-700 flex-shrink-0" />
+            {items.map(item => (
+              <div key={item.key} className="flex items-center gap-1.5 text-xs">
+                <span className="text-gray-500">{item.label}:</span>
+                <span className={`font-medium ${cronStatus.lastRuns[item.key] ? item.color : "text-gray-600"}`}>
+                  {ago(cronStatus.lastRuns[item.key])}
+                </span>
+                <span className="text-gray-700">({item.schedule})</span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Job Discovery Progress Panel */}
       {triggering === "job_discovery" && (
