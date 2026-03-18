@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
 
   const { data: jobs, error } = await supabase
     .from("jobs")
-    .select("id, title, company, location, status, relevance_score, discovered_at, job_url, salary_min, salary_max, salary_currency, required_skills, source")
+    .select("id, title, company, location, status, relevance_score, discovered_at, job_url, salary_min, salary_max, salary_currency, required_skills, source, description")
     .like("source", "company_%")
     .order("relevance_score", { ascending: false })
     .limit(300);

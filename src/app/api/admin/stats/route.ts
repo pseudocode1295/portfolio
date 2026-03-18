@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   ] = await Promise.all([
     // Jobs shown in pipeline: 75%+ match only, sorted by relevance
     supabase.from("jobs")
-      .select("id, title, company, location, status, relevance_score, discovered_at, job_url, salary_min, salary_max, salary_currency, required_skills, source")
+      .select("id, title, company, location, status, relevance_score, discovered_at, job_url, salary_min, salary_max, salary_currency, required_skills, source, description")
       .gte("relevance_score", 0.75)
       .order("relevance_score", { ascending: false })
       .limit(100),
