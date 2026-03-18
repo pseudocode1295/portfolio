@@ -161,6 +161,11 @@ const COMPANY_CATEGORY: Record<string, string> = {
   mongodb: "Data & Infra", snowflake: "Data & Infra", databricks: "Data & Infra", confluent: "Data & Infra",
   hashicorp: "Data & Infra", gitlab: "Data & Infra", pagerduty: "Data & Infra", vercel: "Data & Infra",
   retool: "Data & Infra", airbyte: "Data & Infra",
+  // Analytics & Consulting
+  sigmoid: "Analytics & Consulting", datarobot: "Analytics & Consulting", c3ai: "Analytics & Consulting",
+  h2oai: "Analytics & Consulting", alteryx: "Analytics & Consulting", thoughtspot: "Analytics & Consulting",
+  musigma: "Analytics & Consulting", quantiphi: "Analytics & Consulting",
+  fractal: "Analytics & Consulting", tigeranalytics: "Analytics & Consulting",
 };
 
 function getCompanyCategory(source: string): string {
@@ -852,7 +857,7 @@ export default function AdminDashboard() {
 
         {/* Companies Tab */}
         {activeTab === "companies" && (() => {
-          const categories = ["All", "FAANG", "Big Tech", "Product", "Indian Unicorn", "MNC", "AI/ML", "Data & Infra"];
+          const categories = ["All", "FAANG", "Big Tech", "Product", "Indian Unicorn", "MNC", "AI/ML", "Data & Infra", "Analytics & Consulting"];
           const filtered = companyCategoryFilter === "All"
             ? companyJobs
             : companyJobs.filter(j => getCompanyCategory(j.source) === companyCategoryFilter);
@@ -1129,13 +1134,14 @@ export default function AdminDashboard() {
                     {isCompanyScraper && (() => {
                       const p = parsed as CompanyProgress;
                       const pct = p.totalCompanies > 0 ? Math.round((p.completedCompanies / p.totalCompanies) * 100) : 0;
-                      const categories = ["FAANG", "Big Tech", "Product", "Indian Unicorn", "MNC", "AI/ML", "Data & Infra"];
+                      const categories = ["FAANG", "Big Tech", "Product", "Indian Unicorn", "MNC", "AI/ML", "Data & Infra", "Analytics & Consulting"];
                       const grouped: Record<string, CompanyResult[]> = {};
                       p.companies.forEach(c => { if (!grouped[c.category]) grouped[c.category] = []; grouped[c.category].push(c); });
                       const catColors: Record<string, string> = {
                         "FAANG": "text-blue-400", "Big Tech": "text-purple-400", "Product": "text-cyan-400",
                         "Indian Unicorn": "text-orange-400", "MNC": "text-yellow-400",
                         "AI/ML": "text-emerald-400", "Data & Infra": "text-pink-400",
+                        "Analytics & Consulting": "text-teal-400",
                       };
                       return (
                         <div>

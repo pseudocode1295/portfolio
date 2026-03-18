@@ -4,7 +4,7 @@ import type { AgentResult } from "./types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type CompanyCategory = "FAANG" | "Big Tech" | "Product" | "Indian Unicorn" | "MNC" | "AI/ML" | "Data & Infra";
+export type CompanyCategory = "FAANG" | "Big Tech" | "Product" | "Indian Unicorn" | "MNC" | "AI/ML" | "Data & Infra" | "Analytics & Consulting";
 
 export interface CompanyConfig {
   name: string;
@@ -147,6 +147,19 @@ export const COMPANIES: CompanyConfig[] = [
   { name: "Vercel",      slug: "vercel",      category: "Data & Infra", scrapeType: "lever",      companyId: "vercel" },
   { name: "Retool",      slug: "retool",      category: "Data & Infra", scrapeType: "greenhouse", boardId: "retool" },
   { name: "Airbyte",     slug: "airbyte",     category: "Data & Infra", scrapeType: "greenhouse", boardId: "airbyte" },
+
+  // ── Analytics & Consulting ────────────────────────────────────────────────
+  // Note: PwC/Deloitte/Accenture/Fractal/Nagarro/Tiger use Workday/Oracle/custom — no public API
+  { name: "Sigmoid",          slug: "sigmoid",      category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "sigmoid" },        // verified ✓
+  { name: "DataRobot",        slug: "datarobot",    category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "datarobot" },
+  { name: "C3.ai",            slug: "c3ai",         category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "c3ai" },
+  { name: "H2O.ai",           slug: "h2oai",        category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "h2oai" },
+  { name: "Alteryx",          slug: "alteryx",      category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "alteryx" },
+  { name: "ThoughtSpot",      slug: "thoughtspot",  category: "Analytics & Consulting", scrapeType: "lever",      companyId: "thoughtspot" },
+  { name: "Mu Sigma",         slug: "musigma",      category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "musigma" },
+  { name: "Quantiphi",        slug: "quantiphi",    category: "Analytics & Consulting", scrapeType: "lever",      companyId: "quantiphi" },
+  { name: "Fractal Analytics",slug: "fractal",      category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "fractalanalytics" },
+  { name: "Tiger Analytics",  slug: "tigeranalytics",category:"Analytics & Consulting", scrapeType: "greenhouse", boardId: "tigeranalytics" },
 ];
 
 // ─── ML/AI Relevance ──────────────────────────────────────────────────────────
