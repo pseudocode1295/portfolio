@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, ResponsiveContainer, CartesianGrid } from "recharts";
 
 type JobStatus = "discovered" | "linkedin_pending" | "referral_pending" | "applied" | "responded" | "interview";
 
@@ -269,6 +270,9 @@ function JobCard({
   isExpanded,
   onToggle,
   onDelete,
+  onStatusChange,
+  selected,
+  onSelect,
   displayTitle,
   displayCompany,
   badParse = false,
@@ -279,25 +283,57 @@ function JobCard({
   isExpanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  onStatusChange?: (id: string, status: JobStatus) => void;
+  selected?: boolean;
+  onSelect?: (id: string) => void;
   displayTitle?: string;
   displayCompany?: string;
   badParse?: boolean;
   showSource?: boolean;
   actionLabel?: "View →" | "Apply →";
 }) {
+  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const title = displayTitle ?? job.title;
   const company = displayCompany ?? job.company;
   const { _exp: expObj, _jobType: jobType, _desc: desc } = job;
   const titleFaded = badParse && displayTitle === undefined;
 
   return (
-    <div className={`bg-gray-900 border rounded-xl px-4 py-3 ${badParse ? "border-yellow-900/40" : "border-gray-800"}`}>
+    <div className={`bg-gray-900 border rounded-xl px-4 py-3 transition-colors ${
+      selected ? "border-blue-600/60 bg-blue-950/20" : badParse ? "border-yellow-900/40" : "border-gray-800"
+    }`}>
       <div className="flex items-start justify-between gap-3">
+        {/* Checkbox */}
+        {onSelect && (
+          <button onClick={() => onSelect(job.id)}
+            className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border transition ${selected ? "bg-blue-600 border-blue-500" : "border-gray-600 hover:border-gray-400"}`}>
+            {selected && <span className="text-[10px] text-white font-bold flex items-center justify-center w-full h-full">✓</span>}
+          </button>
+        )}
         <div className="flex-1 min-w-0">
           {/* Row 1: title + badges */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className={`font-semibold ${titleFaded ? "text-gray-400 italic" : "text-white"}`}>{title}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
+            {/* Clickable status badge */}
+            <div className="relative">
+              <button
+                onClick={() => onStatusChange ? setStatusMenuOpen(v => !v) : undefined}
+                className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]} ${onStatusChange ? "cursor-pointer hover:opacity-80" : "cursor-default"} transition`}>
+                {STATUS_LABELS[job.status]} {onStatusChange && "▾"}
+              </button>
+              {statusMenuOpen && onStatusChange && (
+                <div className="absolute top-6 left-0 z-20 bg-gray-800 border border-gray-700 rounded-xl shadow-xl py-1 min-w-[160px]">
+                  {(Object.keys(STATUS_LABELS) as JobStatus[]).map(s => (
+                    <button key={s} onClick={() => { onStatusChange(job.id, s); setStatusMenuOpen(false); }}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-700 flex items-center gap-2 ${s === job.status ? "text-white font-semibold" : "text-gray-300"}`}>
+                      <span className={`w-2 h-2 rounded-full ${STATUS_COLORS[s]}`} />
+                      {STATUS_LABELS[s]}
+                      {s === job.status && <span className="ml-auto text-blue-400">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
             {badParse && <span className="text-xs text-yellow-700 border border-yellow-900/40 px-1.5 py-0.5 rounded">poor parse</span>}
             {expObj && (
@@ -372,7 +408,7 @@ export default function AdminDashboard() {
   const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"job_discovery" | "email_alerts" | "companies" | "approvals" | "interview" | "logs">("job_discovery");
+  const [activeTab, setActiveTab] = useState<"job_discovery" | "email_alerts" | "companies" | "approvals" | "interview" | "logs" | "analytics">("job_discovery");
   const [approvalEdit, setApprovalEdit] = useState<Record<string, string>>({});
   const [triggering, setTriggering] = useState<string | null>(null);
   const [jobProgress, setJobProgress] = useState<JobProgressData | null>(null);
@@ -418,6 +454,20 @@ export default function AdminDashboard() {
     })),
     [companyJobs]
   );
+
+  // ─── Filter / search state (Job Discovery + Email tabs) ─────────────────────
+  const [jobFilter, setJobFilter] = useState<{
+    q: string; source: string; salaryOnly: boolean; sort: "relevance" | "date" | "salary";
+  }>({ q: "", source: "all", salaryOnly: false, sort: "relevance" });
+
+  // ─── Bulk-selection state ─────────────────────────────────────────────────
+  const [selectedJobs, setSelectedJobs] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const toggleSelectJob = (id: string) => setSelectedJobs(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   const fetchData = useCallback(async () => {
     const res = await fetch("/api/admin/stats");
@@ -590,6 +640,37 @@ export default function AdminDashboard() {
 
   async function deleteJob(id: string) {
     await fetch(`/api/admin/jobs?id=${id}`, { method: "DELETE" });
+    fetchData();
+  }
+
+  async function updateJobStatus(id: string, status: JobStatus) {
+    await fetch(`/api/admin/jobs?id=${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    fetchData();
+  }
+
+  async function bulkDeleteJobs() {
+    if (!selectedJobs.size) return;
+    setBulkDeleting(true);
+    await Promise.all([...selectedJobs].map(id => fetch(`/api/admin/jobs?id=${id}`, { method: "DELETE" })));
+    setSelectedJobs(new Set());
+    setBulkDeleting(false);
+    fetchData();
+  }
+
+  async function bulkUpdateStatus(status: JobStatus) {
+    if (!selectedJobs.size) return;
+    await Promise.all([...selectedJobs].map(id =>
+      fetch(`/api/admin/jobs?id=${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      })
+    ));
+    setSelectedJobs(new Set());
     fetchData();
   }
 
@@ -959,56 +1040,167 @@ export default function AdminDashboard() {
       )}
 
       {/* Tabs */}
-      <div className="px-6 border-b border-gray-800 flex gap-1">
+      <div className="px-6 border-b border-gray-800 flex gap-1 overflow-x-auto">
         {([
-          { key: "job_discovery", label: "🔍 Job Discovery" },
-          { key: "email_alerts",  label: "📨 Email Alerts" },
-          { key: "companies",     label: "🏢 Companies" },
-          { key: "approvals",     label: "Approvals" },
-          { key: "interview",     label: "Interview" },
-          { key: "logs",          label: "Logs" },
+          { key: "job_discovery", label: "🔍 Discovery",  count: enrichedJobs.filter(j => !j.source?.endsWith("_email")).length },
+          { key: "email_alerts",  label: "📨 Email",      count: enrichedJobs.filter(j => j.source?.endsWith("_email")).length },
+          { key: "companies",     label: "🏢 Companies",  count: enrichedCompanyJobs.length },
+          { key: "analytics",     label: "📊 Analytics",  count: null },
+          { key: "approvals",     label: "✅ Approvals",  count: data?.pendingApprovals?.length ?? 0 },
+          { key: "interview",     label: "🎤 Interview",  count: null },
+          { key: "logs",          label: "📋 Logs",       count: null },
         ] as const).map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-3 text-sm font-medium transition border-b-2 whitespace-nowrap ${activeTab === tab.key ? "border-blue-500 text-white" : "border-transparent text-gray-400 hover:text-white"}`}
+            className={`px-4 py-3 text-sm font-medium transition border-b-2 whitespace-nowrap flex items-center gap-1.5 ${activeTab === tab.key ? "border-blue-500 text-white" : "border-transparent text-gray-400 hover:text-white"}`}
           >
             {tab.label}
-            {tab.key === "approvals" && (data?.pendingApprovals?.length ?? 0) > 0 && (
-              <span className="ml-2 bg-yellow-600 text-white text-xs px-1.5 py-0.5 rounded-full">{data?.pendingApprovals?.length}</span>
+            {tab.count != null && tab.count > 0 && (
+              <span className={`text-xs px-1.5 py-0.5 rounded-full ${tab.key === "approvals" ? "bg-yellow-600 text-white" : "bg-gray-700 text-gray-300"}`}>
+                {tab.count}
+              </span>
             )}
           </button>
         ))}
       </div>
 
       <div className="px-6 py-4">
-        {/* Pipeline Tab */}
-        {/* Shared status counts bar — shown on both job tabs */}
-        {(activeTab === "job_discovery" || activeTab === "email_alerts") && (
-          <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-            {(Object.keys(STATUS_LABELS) as JobStatus[]).map((s) => (
-              <div key={s} className="flex-shrink-0 bg-gray-900 border border-gray-800 rounded-xl p-3 min-w-[130px]">
-                <div className={`text-xs font-medium px-2 py-1 rounded-full ${STATUS_COLORS[s]} inline-block mb-2`}>{STATUS_LABELS[s]}</div>
-                <div className="text-2xl font-bold">{overview.statusCounts?.[s] || 0}</div>
+        {/* Pipeline funnel — shown on both job tabs */}
+        {(activeTab === "job_discovery" || activeTab === "email_alerts") && (() => {
+          const statuses = Object.keys(STATUS_LABELS) as JobStatus[];
+          const total = overview.statusCounts?.["discovered"] || 1;
+          return (
+            <div className="mb-6 bg-gray-900 border border-gray-800 rounded-xl p-4">
+              <div className="flex items-center gap-0 overflow-x-auto pb-1">
+                {statuses.map((s, i) => {
+                  const count = overview.statusCounts?.[s] || 0;
+                  const pct = i === 0 ? 100 : Math.round((count / total) * 100);
+                  return (
+                    <div key={s} className="flex items-center flex-shrink-0">
+                      <div className="text-center px-3">
+                        <div className="text-2xl font-bold text-white">{count}</div>
+                        <div className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[s]} mt-1`}>{STATUS_LABELS[s]}</div>
+                        {i > 0 && <div className="text-[10px] text-gray-600 mt-0.5">{pct}%</div>}
+                      </div>
+                      {i < statuses.length - 1 && (
+                        <span className="text-gray-700 text-lg px-1">→</span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {/* Job Discovery Tab */}
         {activeTab === "job_discovery" && (() => {
-          const jobs = enrichedJobs.filter(j =>
-            !j.source?.endsWith("_email") && !isOverExperienced(j.title, j.description)
-          );
+          // Source groups
+          const SOURCE_GROUPS: Record<string, (s: string) => boolean> = {
+            all:      () => true,
+            indeed:   s => s === "indeed",
+            linkedin: s => s.includes("linkedin"),
+            remote:   s => ["remotive", "weworkremotely", "jobicy"].includes(s),
+            timesjobs: s => s === "timesjobs",
+            company:  s => s.startsWith("company_"),
+          };
+
+          let jobs = enrichedJobs.filter(j => !j.source?.endsWith("_email") && !isOverExperienced(j.title, j.description));
+
+          // Apply filters
+          const { q, source, salaryOnly, sort } = jobFilter;
+          if (q) jobs = jobs.filter(j => `${j.title} ${j.company}`.toLowerCase().includes(q.toLowerCase()));
+          if (source !== "all") jobs = jobs.filter(j => SOURCE_GROUPS[source]?.(j.source) ?? true);
+          if (salaryOnly) jobs = jobs.filter(j => j.salary_min || j.salary_max);
+          if (sort === "date") jobs = [...jobs].sort((a, b) => new Date(b.discovered_at).getTime() - new Date(a.discovered_at).getTime());
+          if (sort === "salary") jobs = [...jobs].sort((a, b) => (b.salary_max || b.salary_min || 0) - (a.salary_max || a.salary_min || 0));
+
+          const allSelected = jobs.length > 0 && jobs.every(j => selectedJobs.has(j.id));
+          const someSelected = selectedJobs.size > 0;
+
           return (
-            <div className="space-y-2">
-              {jobs.map(job => (
-                <JobCard key={job.id} job={job}
-                  isExpanded={expandedJobs.has(job.id)}
-                  onToggle={() => toggleJob(job.id)}
-                  onDelete={() => deleteJob(job.id)} />
-              ))}
-              {!jobs.length && <p className="text-gray-500 text-center py-8">No jobs discovered yet. Run <span className="text-blue-400">🔍 Run Job Discovery</span> above.</p>}
+            <div>
+              {/* Filter bar */}
+              <div className="bg-gray-900/60 border border-gray-800 rounded-xl px-4 py-3 mb-4 space-y-2">
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Search */}
+                  <input
+                    type="text" placeholder="Search title or company…" value={jobFilter.q}
+                    onChange={e => setJobFilter(f => ({ ...f, q: e.target.value }))}
+                    className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 w-56"
+                  />
+                  {/* Sort */}
+                  <select value={jobFilter.sort} onChange={e => setJobFilter(f => ({ ...f, sort: e.target.value as "relevance" | "date" | "salary" }))}
+                    className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-blue-500">
+                    <option value="relevance">Best match</option>
+                    <option value="date">Newest first</option>
+                    <option value="salary">Salary ↓</option>
+                  </select>
+                  {/* Salary toggle */}
+                  <button onClick={() => setJobFilter(f => ({ ...f, salaryOnly: !f.salaryOnly }))}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition ${jobFilter.salaryOnly ? "bg-green-900/40 border-green-700 text-green-300" : "border-gray-700 text-gray-400 hover:text-white"}`}>
+                    💰 With salary
+                  </button>
+                  {/* Clear */}
+                  {(q || source !== "all" || salaryOnly || sort !== "relevance") && (
+                    <button onClick={() => setJobFilter({ q: "", source: "all", salaryOnly: false, sort: "relevance" })}
+                      className="text-xs text-gray-500 hover:text-white transition">✕ Clear filters</button>
+                  )}
+                  <span className="ml-auto text-xs text-gray-500">{jobs.length} jobs</span>
+                </div>
+                {/* Source chips */}
+                <div className="flex gap-1.5 flex-wrap">
+                  {Object.keys(SOURCE_GROUPS).map(s => (
+                    <button key={s} onClick={() => setJobFilter(f => ({ ...f, source: s }))}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition capitalize ${jobFilter.source === s ? "bg-blue-700 border-blue-600 text-white" : "border-gray-700 text-gray-400 hover:text-white"}`}>
+                      {s === "all" ? "All sources" : s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Bulk action bar */}
+              {someSelected && (
+                <div className="flex items-center gap-3 bg-blue-950/40 border border-blue-800/50 rounded-xl px-4 py-2.5 mb-3">
+                  <span className="text-sm text-blue-300 font-medium">{selectedJobs.size} selected</span>
+                  <button onClick={() => bulkUpdateStatus("applied")}
+                    className="text-xs bg-purple-700 hover:bg-purple-600 text-white px-3 py-1 rounded-lg transition">✓ Mark Applied</button>
+                  <button onClick={() => bulkUpdateStatus("interview")}
+                    className="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1 rounded-lg transition">🎤 Mark Interview</button>
+                  <button onClick={bulkDeleteJobs} disabled={bulkDeleting}
+                    className="text-xs bg-red-900/60 hover:bg-red-800 text-red-300 px-3 py-1 rounded-lg transition border border-red-800/50">
+                    {bulkDeleting ? "Deleting…" : "🗑 Delete all"}
+                  </button>
+                  <button onClick={() => setSelectedJobs(new Set())} className="ml-auto text-xs text-gray-500 hover:text-white">✕ Clear</button>
+                </div>
+              )}
+
+              {/* Select-all row */}
+              {jobs.length > 0 && (
+                <div className="flex items-center gap-2 px-1 mb-1">
+                  <button onClick={() => {
+                    if (allSelected) setSelectedJobs(new Set());
+                    else setSelectedJobs(new Set(jobs.map(j => j.id)));
+                  }} className={`w-4 h-4 rounded border transition ${allSelected ? "bg-blue-600 border-blue-500" : "border-gray-600 hover:border-gray-400"}`}>
+                    {allSelected && <span className="text-[10px] text-white font-bold flex items-center justify-center w-full h-full">✓</span>}
+                  </button>
+                  <span className="text-xs text-gray-600">Select all</span>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {jobs.map(job => (
+                  <JobCard key={job.id} job={job}
+                    isExpanded={expandedJobs.has(job.id)}
+                    onToggle={() => toggleJob(job.id)}
+                    onDelete={() => deleteJob(job.id)}
+                    onStatusChange={updateJobStatus}
+                    selected={selectedJobs.has(job.id)}
+                    onSelect={toggleSelectJob} />
+                ))}
+                {!jobs.length && <p className="text-gray-500 text-center py-8">No jobs match your filters. <button onClick={() => setJobFilter({ q: "", source: "all", salaryOnly: false, sort: "relevance" })} className="text-blue-400 hover:underline">Clear filters</button></p>}
+              </div>
             </div>
           );
         })()}
@@ -1044,6 +1236,7 @@ export default function AdminDashboard() {
                     isExpanded={expandedJobs.has(job.id)}
                     onToggle={() => toggleJob(job.id)}
                     onDelete={() => deleteJob(job.id)}
+                    onStatusChange={updateJobStatus}
                     displayTitle={displayTitle}
                     displayCompany={displayCompany}
                     badParse={badTitle || badCompany} />
@@ -1129,6 +1322,166 @@ export default function AdminDashboard() {
                   ))}
                 </div>
               )}
+            </div>
+          );
+        })()}
+
+        {/* Analytics Tab */}
+        {activeTab === "analytics" && (() => {
+          const allJobs = [...enrichedJobs, ...enrichedCompanyJobs];
+          const counts = Object.keys(STATUS_LABELS) as JobStatus[];
+
+          // Pipeline data
+          const pipelineData = counts.map(s => ({
+            name: STATUS_LABELS[s],
+            count: (data?.overview?.statusCounts?.[s] || 0),
+          }));
+
+          // Source breakdown
+          const sourceCounts: Record<string, number> = {};
+          for (const j of allJobs) {
+            const group = j.source.endsWith("_email") ? "Email" :
+              j.source.startsWith("company_") ? "Company Pages" :
+              j.source === "indeed" ? "Indeed" :
+              j.source.includes("linkedin") ? "LinkedIn" :
+              ["remotive", "weworkremotely", "jobicy"].includes(j.source) ? "Remote Boards" :
+              j.source === "timesjobs" ? "TimesJobs" : "Other";
+            sourceCounts[group] = (sourceCounts[group] || 0) + 1;
+          }
+          const sourceData = Object.entries(sourceCounts).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value }));
+          const PIE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4"];
+
+          // Top skills
+          const skillCounts: Record<string, number> = {};
+          for (const j of allJobs) {
+            for (const skill of j.required_skills || []) {
+              skillCounts[skill] = (skillCounts[skill] || 0) + 1;
+            }
+          }
+          const topSkills = Object.entries(skillCounts).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([name, count]) => ({ name, count }));
+
+          // Skills gap — Ajay's skills
+          const MY_SKILLS = new Set(["Python", "PyTorch", "TensorFlow", "LangChain", "Azure", "AWS", "GCP", "RAG", "LLM", "GenAI", "SQL", "Spark", "MLflow", "Docker", "Kubernetes", "FastAPI", "HuggingFace", "OpenAI", "Transformers", "Databricks"]);
+          const gapSkills = topSkills.map(s => ({ ...s, have: MY_SKILLS.has(s.name) }));
+
+          // Salary data
+          const salaryJobs = allJobs.filter(j => j.salary_min && j.salary_min > 0);
+          const salaryBuckets: Record<string, number> = { "< 20L": 0, "20–30L": 0, "30–50L": 0, "50–80L": 0, "80L+": 0 };
+          for (const j of salaryJobs) {
+            const s = j.salary_min!;
+            if (s < 20) salaryBuckets["< 20L"]++;
+            else if (s < 30) salaryBuckets["20–30L"]++;
+            else if (s < 50) salaryBuckets["30–50L"]++;
+            else if (s < 80) salaryBuckets["50–80L"]++;
+            else salaryBuckets["80L+"]++;
+          }
+          const salaryData = Object.entries(salaryBuckets).map(([range, count]) => ({ range, count }));
+
+          return (
+            <div className="space-y-6">
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg font-semibold">📊 Job Market Analytics</h2>
+                <span className="text-xs text-gray-500">{allJobs.length} total jobs analysed</span>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Pipeline funnel */}
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                  <h3 className="text-sm font-semibold text-gray-300 mb-4">Pipeline Status</h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={pipelineData} margin={{ left: -20 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis dataKey="name" tick={{ fill: "#9ca3af", fontSize: 10 }} />
+                      <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} />
+                      <Tooltip contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, color: "#fff" }} />
+                      <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Source breakdown */}
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                  <h3 className="text-sm font-semibold text-gray-300 mb-4">Jobs by Source</h3>
+                  {sourceData.length > 0 ? (
+                    <div className="flex items-center gap-4">
+                      <ResponsiveContainer width={160} height={160}>
+                        <PieChart>
+                          <Pie data={sourceData} cx="50%" cy="50%" innerRadius={40} outerRadius={70} dataKey="value">
+                            {sourceData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                          </Pie>
+                          <Tooltip contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, color: "#fff" }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="flex-1 space-y-1.5">
+                        {sourceData.map((s, i) => (
+                          <div key={s.name} className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                            <span className="text-xs text-gray-300 flex-1">{s.name}</span>
+                            <span className="text-xs text-gray-500 font-medium">{s.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : <p className="text-sm text-gray-500 py-8 text-center">No data yet</p>}
+                </div>
+
+                {/* Salary distribution */}
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                  <h3 className="text-sm font-semibold text-gray-300 mb-1">Salary Distribution</h3>
+                  <p className="text-xs text-gray-600 mb-4">{salaryJobs.length} of {allJobs.length} jobs have salary data</p>
+                  {salaryJobs.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={160}>
+                      <BarChart data={salaryData} margin={{ left: -20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                        <XAxis dataKey="range" tick={{ fill: "#9ca3af", fontSize: 10 }} />
+                        <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} />
+                        <Tooltip contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, color: "#fff" }} />
+                        <Bar dataKey="count" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <p className="text-sm text-gray-500 text-center py-8">Most job boards don{"'"}t publish salary. Run more company scrapes to improve coverage.</p>
+                  )}
+                </div>
+
+                {/* Skills demand */}
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                  <h3 className="text-sm font-semibold text-gray-300 mb-4">Top Skills in Demand</h3>
+                  {topSkills.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={topSkills} layout="vertical" margin={{ left: 20, right: 20 }}>
+                        <XAxis type="number" tick={{ fill: "#9ca3af", fontSize: 10 }} />
+                        <YAxis type="category" dataKey="name" tick={{ fill: "#9ca3af", fontSize: 10 }} width={80} />
+                        <Tooltip contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, color: "#fff" }} />
+                        <Bar dataKey="count" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : <p className="text-sm text-gray-500 py-8 text-center">No skill data yet</p>}
+                </div>
+              </div>
+
+              {/* Skills gap analysis */}
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <h3 className="text-sm font-semibold text-gray-300 mb-1">Skills Gap Analysis</h3>
+                <p className="text-xs text-gray-600 mb-4">Top skills across all job descriptions vs your profile</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                  {gapSkills.map(s => (
+                    <div key={s.name} className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
+                      s.have ? "bg-emerald-950/40 border-emerald-800/50" : "bg-red-950/20 border-red-900/30"
+                    }`}>
+                      <span className={`text-sm ${s.have ? "text-emerald-400" : "text-red-500"}`}>{s.have ? "✓" : "✗"}</span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-white truncate">{s.name}</div>
+                        <div className="text-[10px] text-gray-500">{s.count} jobs</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-4 mt-3 text-xs text-gray-500">
+                  <span className="text-emerald-400">✓ {gapSkills.filter(s => s.have).length} skills you have</span>
+                  <span className="text-red-400">✗ {gapSkills.filter(s => !s.have).length} skills to consider learning</span>
+                </div>
+              </div>
             </div>
           );
         })()}
