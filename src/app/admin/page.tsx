@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 
 type JobStatus = "discovered" | "linkedin_pending" | "referral_pending" | "applied" | "responded" | "interview";
@@ -205,23 +205,38 @@ const STATUS_LABELS: Record<JobStatus, string> = {
 
 // ─── Job detail helpers ───────────────────────────────────────────────────────
 
-function extractExperience(title: string, desc: string | null): string | null {
+interface ExpResult { label: string; inferred: boolean }
+
+function extractExperience(title: string, desc: string | null): ExpResult | null {
   const text = `${title} ${desc || ""}`;
   const rangeMatch = text.match(/(\d+)\s*[-–to]+\s*(\d+)\s*\+?\s*years?/i);
-  if (rangeMatch) return `${rangeMatch[1]}–${rangeMatch[2]} yrs`;
+  if (rangeMatch) return { label: `${rangeMatch[1]}–${rangeMatch[2]} yrs`, inferred: false };
   const plusMatch = text.match(/(\d+)\s*\+\s*years?/i);
-  if (plusMatch) return `${plusMatch[1]}+ yrs`;
+  if (plusMatch) return { label: `${plusMatch[1]}+ yrs`, inferred: false };
   const minMatch = text.match(/(?:minimum|at\s+least|min\.?)\s+(\d+)\s*years?/i);
-  if (minMatch) return `${minMatch[1]}+ yrs`;
+  if (minMatch) return { label: `${minMatch[1]}+ yrs`, inferred: false };
   const upToMatch = text.match(/up\s+to\s+(\d+)\s*years?/i);
-  if (upToMatch) return `≤${upToMatch[1]} yrs`;
-  // Infer from seniority in title
+  if (upToMatch) return { label: `≤${upToMatch[1]} yrs`, inferred: false };
+  // Infer from seniority in title — mark as estimated
   const t = title.toLowerCase();
-  if (t.includes("staff") || t.includes("principal")) return "8+ yrs";
-  if (t.includes("senior") || t.includes("lead") || t.includes("sr.")) return "5+ yrs";
-  if (t.includes("junior") || t.includes("associate") || t.includes("jr.")) return "0–2 yrs";
-  if (t.includes("intern")) return "Intern";
+  if (t.includes("staff") || t.includes("principal")) return { label: "8+ yrs", inferred: true };
+  if (t.includes("senior") || t.includes("lead") || t.includes("sr.")) return { label: "5+ yrs", inferred: true };
+  if (t.includes("junior") || t.includes("associate") || t.includes("jr.")) return { label: "0–2 yrs", inferred: true };
+  if (t.includes("intern")) return { label: "Intern", inferred: true };
   return null;
+}
+
+// Returns true when the job explicitly requires ≥8 years or is staff/principal-level.
+function isOverExperienced(title: string, desc: string | null): boolean {
+  const text = `${title} ${desc || ""}`;
+  const rangeMatch = text.match(/(\d+)\s*[-–to]+\s*(\d+)\s*\+?\s*years?/i);
+  if (rangeMatch && parseInt(rangeMatch[1]) >= 8) return true;
+  const plusMatch = text.match(/(\d+)\s*\+\s*years?/i);
+  if (plusMatch && parseInt(plusMatch[1]) >= 8) return true;
+  const minMatch = text.match(/(?:minimum|at\s+least|min\.?)\s+(\d+)\s*years?/i);
+  if (minMatch && parseInt(minMatch[1]) >= 8) return true;
+  const t = title.toLowerCase();
+  return t.includes("staff") || t.includes("principal");
 }
 
 function extractJobType(location: string, desc: string | null): "Remote" | "Hybrid" | "Onsite" | null {
@@ -234,7 +249,123 @@ function extractJobType(location: string, desc: string | null): "Remote" | "Hybr
 
 function cleanDesc(desc: string | null): string | null {
   if (!desc) return null;
-  return desc.replace(/\s+/g, " ").trim().slice(0, 350);
+  const trimmed = desc.replace(/\s+/g, " ").trim();
+  if (trimmed.length <= 350) return trimmed;
+  return trimmed.slice(0, 350).replace(/\s\S*$/, "");
+}
+
+// ─── Enriched job type (pre-computed display fields) ─────────────────────────
+
+type EnrichedJob = Job & {
+  _exp: ExpResult | null;
+  _jobType: "Remote" | "Hybrid" | "Onsite" | null;
+  _desc: string | null;
+};
+
+// ─── Shared JobCard component ─────────────────────────────────────────────────
+
+function JobCard({
+  job,
+  isExpanded,
+  onToggle,
+  onDelete,
+  displayTitle,
+  displayCompany,
+  badParse = false,
+  showSource = true,
+  actionLabel = "View →",
+}: {
+  job: EnrichedJob;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onDelete: () => void;
+  displayTitle?: string;
+  displayCompany?: string;
+  badParse?: boolean;
+  showSource?: boolean;
+  actionLabel?: "View →" | "Apply →";
+}) {
+  const title = displayTitle ?? job.title;
+  const company = displayCompany ?? job.company;
+  const { _exp: expObj, _jobType: jobType, _desc: desc } = job;
+  const titleFaded = badParse && displayTitle === undefined;
+
+  return (
+    <div className={`bg-gray-900 border rounded-xl px-4 py-3 ${badParse ? "border-yellow-900/40" : "border-gray-800"}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          {/* Row 1: title + badges */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`font-semibold ${titleFaded ? "text-gray-400 italic" : "text-white"}`}>{title}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
+            <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
+            {badParse && <span className="text-xs text-yellow-700 border border-yellow-900/40 px-1.5 py-0.5 rounded">poor parse</span>}
+            {expObj && (
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                expObj.inferred
+                  ? "bg-gray-800/60 text-gray-500 border-gray-700"
+                  : "bg-indigo-900/50 text-indigo-300 border-indigo-800/60"
+              }`}>
+                🎓 {expObj.inferred ? `~${expObj.label}` : expObj.label}
+              </span>
+            )}
+            {jobType && (
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                jobType === "Remote" ? "bg-emerald-900/40 text-emerald-300 border-emerald-800/50" :
+                jobType === "Hybrid" ? "bg-yellow-900/40 text-yellow-300 border-yellow-800/50" :
+                "bg-gray-800 text-gray-400 border-gray-700"
+              }`}>{jobType}</span>
+            )}
+          </div>
+          {/* Row 2: company · location · source · date */}
+          <div className="text-sm text-gray-400 mt-0.5">
+            <span className={badParse && company === "—" ? "text-gray-600" : ""}>{company}</span>
+            {job.location && <span> · {job.location}</span>}
+            {showSource && <span className="ml-2 text-gray-600 text-xs">{job.source}</span>}
+            <span className="ml-2 text-gray-600 text-xs">{new Date(job.discovered_at).toLocaleDateString()}</span>
+          </div>
+          {/* Row 3: salary */}
+          {(job.salary_min || job.salary_max) && (
+            <div className="text-xs text-green-400 mt-1">
+              💰 {job.salary_min && job.salary_max
+                ? `${job.salary_min}–${job.salary_max} LPA`
+                : job.salary_min ? `From ${job.salary_min} LPA` : `Up to ${job.salary_max} LPA`}
+            </div>
+          )}
+          {/* Row 4: skills */}
+          {job.required_skills?.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {job.required_skills.slice(0, 8).map(s => (
+                <span key={s} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{s}</span>
+              ))}
+              {job.required_skills.length > 8 && <span className="text-xs text-gray-600">+{job.required_skills.length - 8} more</span>}
+            </div>
+          )}
+          {/* Expanded: description / responsibilities */}
+          {isExpanded && desc && (
+            <div className="mt-2 text-xs text-gray-400 bg-gray-800/60 rounded-lg px-3 py-2 border border-gray-700/50 leading-relaxed">
+              <span className="text-gray-500 font-medium uppercase tracking-wide text-[10px] block mb-1">Roles & Responsibilities</span>
+              {desc}{desc.length >= 350 && <span className="text-gray-600"> …</span>}
+            </div>
+          )}
+        </div>
+        {/* Actions */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {desc && (
+            <button onClick={onToggle}
+              className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 px-2 py-1 rounded-lg transition"
+              title={isExpanded ? "Hide details" : "Show details"}>
+              {isExpanded ? "▲" : "▼"}
+            </button>
+          )}
+          <a href={job.job_url} target="_blank" rel="noopener noreferrer"
+            className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">{actionLabel}</a>
+          <button onClick={onDelete}
+            className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition" title="Remove">✕</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function AdminDashboard() {
@@ -267,6 +398,26 @@ export default function AdminDashboard() {
     next.has(id) ? next.delete(id) : next.add(id);
     return next;
   });
+
+  // Pre-compute display fields once per data change — avoids re-running regexes on every render
+  const enrichedJobs = useMemo<EnrichedJob[]>(
+    () => (data?.jobs || []).map(j => ({
+      ...j,
+      _exp: extractExperience(j.title, j.description),
+      _jobType: extractJobType(j.location || "", j.description),
+      _desc: cleanDesc(j.description),
+    })),
+    [data]
+  );
+  const enrichedCompanyJobs = useMemo<EnrichedJob[]>(
+    () => companyJobs.map(j => ({
+      ...j,
+      _exp: extractExperience(j.title, j.description),
+      _jobType: extractJobType(j.location || "", j.description),
+      _desc: cleanDesc(j.description),
+    })),
+    [companyJobs]
+  );
 
   const fetchData = useCallback(async () => {
     const res = await fetch("/api/admin/stats");
@@ -846,81 +997,17 @@ export default function AdminDashboard() {
 
         {/* Job Discovery Tab */}
         {activeTab === "job_discovery" && (() => {
-          const jobs = (data?.jobs || []).filter(j => !j.source?.endsWith("_email"));
+          const jobs = enrichedJobs.filter(j =>
+            !j.source?.endsWith("_email") && !isOverExperienced(j.title, j.description)
+          );
           return (
             <div className="space-y-2">
-              {jobs.map(job => {
-                const exp = extractExperience(job.title, job.description);
-                const jobType = extractJobType(job.location || "", job.description);
-                const desc = cleanDesc(job.description);
-                const isExpanded = expandedJobs.has(job.id);
-                return (
-                  <div key={job.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        {/* Row 1: title + badges */}
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-white">{job.title}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
-                          <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
-                          {exp && <span className="text-xs bg-indigo-900/50 text-indigo-300 border border-indigo-800/60 px-2 py-0.5 rounded-full">🎓 {exp}</span>}
-                          {jobType && (
-                            <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                              jobType === "Remote" ? "bg-emerald-900/40 text-emerald-300 border-emerald-800/50" :
-                              jobType === "Hybrid" ? "bg-yellow-900/40 text-yellow-300 border-yellow-800/50" :
-                              "bg-gray-800 text-gray-400 border-gray-700"
-                            }`}>{jobType}</span>
-                          )}
-                        </div>
-                        {/* Row 2: company · location · source · date */}
-                        <div className="text-sm text-gray-400 mt-0.5">
-                          {job.company}{job.location && <span> · {job.location}</span>}
-                          <span className="ml-2 text-gray-600 text-xs">{job.source}</span>
-                          <span className="ml-2 text-gray-600 text-xs">{new Date(job.discovered_at).toLocaleDateString()}</span>
-                        </div>
-                        {/* Row 3: salary */}
-                        {(job.salary_min || job.salary_max) && (
-                          <div className="text-xs text-green-400 mt-1">
-                            💰 {job.salary_min && job.salary_max
-                              ? `${job.salary_min}–${job.salary_max} LPA`
-                              : job.salary_min ? `From ${job.salary_min} LPA` : `Up to ${job.salary_max} LPA`}
-                          </div>
-                        )}
-                        {/* Row 4: skills */}
-                        {job.required_skills?.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1.5">
-                            {job.required_skills.slice(0, 8).map(s => (
-                              <span key={s} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{s}</span>
-                            ))}
-                            {job.required_skills.length > 8 && <span className="text-xs text-gray-600">+{job.required_skills.length - 8} more</span>}
-                          </div>
-                        )}
-                        {/* Expanded: description / responsibilities */}
-                        {isExpanded && desc && (
-                          <div className="mt-2 text-xs text-gray-400 bg-gray-800/60 rounded-lg px-3 py-2 border border-gray-700/50 leading-relaxed">
-                            <span className="text-gray-500 font-medium uppercase tracking-wide text-[10px] block mb-1">Roles & Responsibilities</span>
-                            {desc}{desc.length >= 350 && <span className="text-gray-600"> …</span>}
-                          </div>
-                        )}
-                      </div>
-                      {/* Actions */}
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {desc && (
-                          <button onClick={() => toggleJob(job.id)}
-                            className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 px-2 py-1 rounded-lg transition"
-                            title={isExpanded ? "Hide details" : "Show details"}>
-                            {isExpanded ? "▲" : "▼"}
-                          </button>
-                        )}
-                        <a href={job.job_url} target="_blank" rel="noopener noreferrer"
-                          className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">View →</a>
-                        <button onClick={() => deleteJob(job.id)}
-                          className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition" title="Remove">✕</button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+              {jobs.map(job => (
+                <JobCard key={job.id} job={job}
+                  isExpanded={expandedJobs.has(job.id)}
+                  onToggle={() => toggleJob(job.id)}
+                  onDelete={() => deleteJob(job.id)} />
+              ))}
               {!jobs.length && <p className="text-gray-500 text-center py-8">No jobs discovered yet. Run <span className="text-blue-400">🔍 Run Job Discovery</span> above.</p>}
             </div>
           );
@@ -928,86 +1015,12 @@ export default function AdminDashboard() {
 
         {/* Email Alerts Tab */}
         {activeTab === "email_alerts" && (() => {
-          const jobs = (data?.jobs || []).filter(j => j.source?.endsWith("_email"));
+          const jobs = enrichedJobs.filter(j =>
+            j.source?.endsWith("_email") && !isOverExperienced(j.title, j.description)
+          );
           const badJobs = jobs.filter(j =>
             /^your job alert/i.test(j.title) || j.company === ".." || j.company === "Unknown" || j.company === ""
           );
-          const isBadTitle = (title: string) => /^your job alert/i.test(title);
-          const isBadCompany = (co: string) => !co || co === ".." || co === "Unknown";
-
-          const EmailJobCard = ({ job }: { job: Job }) => {
-            const badTitle = isBadTitle(job.title);
-            const badCompany = isBadCompany(job.company);
-            const liJobId = job.job_url?.match(/jobs\/view\/(\d+)/)?.[1];
-            const displayTitle = badTitle ? (liJobId ? `LinkedIn Job #${liJobId}` : "Job Alert") : job.title;
-            const displayCompany = badCompany ? "—" : job.company;
-            const exp = extractExperience(job.title, job.description);
-            const jobType = extractJobType(job.location || "", job.description);
-            const desc = cleanDesc(job.description);
-            const isExpanded = expandedJobs.has(job.id);
-            return (
-              <div className={`bg-gray-900 border rounded-xl px-4 py-3 ${badTitle || badCompany ? "border-yellow-900/40" : "border-gray-800"}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`font-semibold ${badTitle ? "text-gray-400 italic" : "text-white"}`}>{displayTitle}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
-                      <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
-                      {(badTitle || badCompany) && <span className="text-xs text-yellow-700 border border-yellow-900/40 px-1.5 py-0.5 rounded">poor parse</span>}
-                      {exp && <span className="text-xs bg-indigo-900/50 text-indigo-300 border border-indigo-800/60 px-2 py-0.5 rounded-full">🎓 {exp}</span>}
-                      {jobType && (
-                        <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                          jobType === "Remote" ? "bg-emerald-900/40 text-emerald-300 border-emerald-800/50" :
-                          jobType === "Hybrid" ? "bg-yellow-900/40 text-yellow-300 border-yellow-800/50" :
-                          "bg-gray-800 text-gray-400 border-gray-700"
-                        }`}>{jobType}</span>
-                      )}
-                    </div>
-                    <div className="text-sm text-gray-400 mt-0.5">
-                      <span className={badCompany ? "text-gray-600" : ""}>{displayCompany}</span>
-                      {job.location && <span> · {job.location}</span>}
-                      <span className="ml-2 text-gray-600 text-xs">{job.source}</span>
-                      <span className="ml-2 text-gray-600 text-xs">{new Date(job.discovered_at).toLocaleDateString()}</span>
-                    </div>
-                    {(job.salary_min || job.salary_max) && (
-                      <div className="text-xs text-green-400 mt-1">
-                        💰 {job.salary_min && job.salary_max
-                          ? `${job.salary_min}–${job.salary_max} LPA`
-                          : job.salary_min ? `From ${job.salary_min} LPA` : `Up to ${job.salary_max} LPA`}
-                      </div>
-                    )}
-                    {job.required_skills?.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {job.required_skills.slice(0, 6).map(s => (
-                          <span key={s} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{s}</span>
-                        ))}
-                        {job.required_skills.length > 6 && <span className="text-xs text-gray-600">+{job.required_skills.length - 6} more</span>}
-                      </div>
-                    )}
-                    {isExpanded && desc && (
-                      <div className="mt-2 text-xs text-gray-400 bg-gray-800/60 rounded-lg px-3 py-2 border border-gray-700/50 leading-relaxed">
-                        <span className="text-gray-500 font-medium uppercase tracking-wide text-[10px] block mb-1">Roles & Responsibilities</span>
-                        {desc}{desc.length >= 350 && <span className="text-gray-600"> …</span>}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {desc && (
-                      <button onClick={() => toggleJob(job.id)}
-                        className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 px-2 py-1 rounded-lg transition"
-                        title={isExpanded ? "Hide details" : "Show details"}>
-                        {isExpanded ? "▲" : "▼"}
-                      </button>
-                    )}
-                    <a href={job.job_url} target="_blank" rel="noopener noreferrer"
-                      className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">View →</a>
-                    <button onClick={() => deleteJob(job.id)}
-                      className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition" title="Remove">✕</button>
-                  </div>
-                </div>
-              </div>
-            );
-          };
 
           return (
             <div className="space-y-2">
@@ -1020,7 +1033,22 @@ export default function AdminDashboard() {
                   </button>
                 </div>
               )}
-              {jobs.map(job => <EmailJobCard key={job.id} job={job} />)}
+              {jobs.map(job => {
+                const badTitle = /^your job alert/i.test(job.title);
+                const badCompany = !job.company || job.company === ".." || job.company === "Unknown";
+                const liJobId = job.job_url?.match(/jobs\/view\/(\d+)/)?.[1];
+                const displayTitle = badTitle ? (liJobId ? `LinkedIn Job #${liJobId}` : "Job Alert") : undefined;
+                const displayCompany = badCompany ? "—" : undefined;
+                return (
+                  <JobCard key={job.id} job={job}
+                    isExpanded={expandedJobs.has(job.id)}
+                    onToggle={() => toggleJob(job.id)}
+                    onDelete={() => deleteJob(job.id)}
+                    displayTitle={displayTitle}
+                    displayCompany={displayCompany}
+                    badParse={badTitle || badCompany} />
+                );
+              })}
               {!jobs.length && <p className="text-gray-500 text-center py-8">No email jobs yet. Run <span className="text-purple-400">📨 Scrape Job Alert Emails</span> above.</p>}
             </div>
           );
@@ -1029,12 +1057,13 @@ export default function AdminDashboard() {
         {/* Companies Tab */}
         {activeTab === "companies" && (() => {
           const categories = ["All", "FAANG", "Big Tech", "Product", "Indian Unicorn", "MNC", "AI/ML", "Data & Infra", "Analytics & Consulting"];
-          const filtered = companyCategoryFilter === "All"
-            ? companyJobs
-            : companyJobs.filter(j => getCompanyCategory(j.source) === companyCategoryFilter);
+          const filtered = (companyCategoryFilter === "All"
+            ? enrichedCompanyJobs
+            : enrichedCompanyJobs.filter(j => getCompanyCategory(j.source) === companyCategoryFilter)
+          ).filter(j => !isOverExperienced(j.title, j.description));
 
           // Group by company name within the filtered list
-          const byCompany: Record<string, Job[]> = {};
+          const byCompany: Record<string, EnrichedJob[]> = {};
           for (const job of filtered) {
             if (!byCompany[job.company]) byCompany[job.company] = [];
             byCompany[job.company].push(job);
@@ -1044,7 +1073,7 @@ export default function AdminDashboard() {
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold">🏢 Company Career Pages</h2>
-                <span className="text-xs text-gray-500">{companyJobs.length} jobs scraped · {Object.keys(byCompany).length} companies</span>
+                <span className="text-xs text-gray-500">{filtered.length} jobs scraped · {Object.keys(byCompany).length} companies</span>
               </div>
 
               {/* Category filter tabs */}
@@ -1087,75 +1116,14 @@ export default function AdminDashboard() {
                         <span className="text-xs text-gray-600">{getCompanyCategory(jobs[0].source)}</span>
                       </div>
                       <div className="space-y-1.5 ml-2">
-                        {jobs.map(job => {
-                          const exp = extractExperience(job.title, job.description);
-                          const jobType = extractJobType(job.location || "", job.description);
-                          const desc = cleanDesc(job.description);
-                          const isExpanded = expandedJobs.has(job.id);
-                          return (
-                            <div key={job.id} className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="font-medium text-white text-sm">{job.title}</span>
-                                    <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[job.status]}`}>{STATUS_LABELS[job.status]}</span>
-                                    <span className="text-xs text-gray-500">{Math.round(job.relevance_score * 100)}% match</span>
-                                    {exp && <span className="text-xs bg-indigo-900/50 text-indigo-300 border border-indigo-800/60 px-2 py-0.5 rounded-full">🎓 {exp}</span>}
-                                    {jobType && (
-                                      <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                                        jobType === "Remote" ? "bg-emerald-900/40 text-emerald-300 border-emerald-800/50" :
-                                        jobType === "Hybrid" ? "bg-yellow-900/40 text-yellow-300 border-yellow-800/50" :
-                                        "bg-gray-800 text-gray-400 border-gray-700"
-                                      }`}>{jobType}</span>
-                                    )}
-                                  </div>
-                                  <div className="text-xs text-gray-400 mt-0.5">
-                                    {job.location && <span>{job.location}</span>}
-                                    <span className="ml-2 text-gray-600">{new Date(job.discovered_at).toLocaleDateString()}</span>
-                                  </div>
-                                  {(job.salary_min || job.salary_max) && (
-                                    <div className="text-xs text-green-400 mt-1">
-                                      💰 {job.salary_min && job.salary_max
-                                        ? `${job.salary_min}–${job.salary_max} LPA`
-                                        : job.salary_min ? `From ${job.salary_min} LPA` : `Up to ${job.salary_max} LPA`}
-                                    </div>
-                                  )}
-                                  {job.required_skills?.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-1.5">
-                                      {job.required_skills.slice(0, 6).map(s => (
-                                        <span key={s} className="text-xs bg-gray-800 text-gray-300 px-2 py-0.5 rounded-full border border-gray-700">{s}</span>
-                                      ))}
-                                      {job.required_skills.length > 6 && <span className="text-xs text-gray-600">+{job.required_skills.length - 6}</span>}
-                                    </div>
-                                  )}
-                                  {isExpanded && desc && (
-                                    <div className="mt-2 text-xs text-gray-400 bg-gray-800/60 rounded-lg px-3 py-2 border border-gray-700/50 leading-relaxed">
-                                      <span className="text-gray-500 font-medium uppercase tracking-wide text-[10px] block mb-1">Roles & Responsibilities</span>
-                                      {desc}{desc.length >= 350 && <span className="text-gray-600"> …</span>}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2 flex-shrink-0">
-                                  {desc && (
-                                    <button onClick={() => toggleJob(job.id)}
-                                      className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 px-2 py-1 rounded-lg transition"
-                                      title={isExpanded ? "Hide details" : "Show details"}>
-                                      {isExpanded ? "▲" : "▼"}
-                                    </button>
-                                  )}
-                                  <a href={job.job_url} target="_blank" rel="noopener noreferrer"
-                                    className="text-xs text-blue-400 hover:text-blue-300 border border-blue-900 px-2 py-1 rounded-lg transition">
-                                    Apply →
-                                  </a>
-                                  <button onClick={() => deleteJob(job.id)}
-                                    className="text-xs text-red-500 hover:text-red-400 border border-red-900/50 px-2 py-1 rounded-lg transition">
-                                    ✕
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                        {jobs.map(job => (
+                          <JobCard key={job.id} job={job}
+                            isExpanded={expandedJobs.has(job.id)}
+                            onToggle={() => toggleJob(job.id)}
+                            onDelete={() => deleteJob(job.id)}
+                            showSource={false}
+                            actionLabel="Apply →" />
+                        ))}
                       </div>
                     </div>
                   ))}

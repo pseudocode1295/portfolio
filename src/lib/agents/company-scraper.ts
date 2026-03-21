@@ -408,6 +408,10 @@ async function scrapeWebPage(config: CompanyConfig): Promise<{ found: number; sa
       return results;
     });
 
+    if (rawJobs.length === 0) {
+      console.warn(`[company-scraper] ⚠ ${config.name}: Playwright extracted 0 links — page may have changed structure or requires auth`);
+    }
+
     let found = 0, saved = 0;
     for (const job of rawJobs) {
       if (!isMlRelevant(job.title)) continue;

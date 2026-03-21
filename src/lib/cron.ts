@@ -30,19 +30,19 @@ export function startCronJobs() {
 
   cron.schedule(SCHEDULES.job_discovery, async () => {
     console.log("[cron] job_discovery starting");
-    await stamp("cron_last_job_discovery");
+    await Promise.all([stamp("cron_last_job_discovery"), stamp("cron_started_at")]);
     try { await runJobDiscoveryAgent(); } catch (e) { console.error("[cron] job_discovery error:", e); }
   });
 
   cron.schedule(SCHEDULES.email_scraper, async () => {
     console.log("[cron] email_scraper starting");
-    await stamp("cron_last_email_scraper");
+    await Promise.all([stamp("cron_last_email_scraper"), stamp("cron_started_at")]);
     try { await runJobEmailScraperAgent(7); } catch (e) { console.error("[cron] email_scraper error:", e); }
   });
 
   cron.schedule(SCHEDULES.company_scraper, async () => {
     console.log("[cron] company_scraper starting");
-    await stamp("cron_last_company_scraper");
+    await Promise.all([stamp("cron_last_company_scraper"), stamp("cron_started_at")]);
     try { await runCompanyScraperAgent(); } catch (e) { console.error("[cron] company_scraper error:", e); }
   });
 

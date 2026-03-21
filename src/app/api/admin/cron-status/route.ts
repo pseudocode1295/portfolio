@@ -12,16 +12,22 @@ export async function GET(req: NextRequest) {
     "cron_last_company_scraper",
   ];
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("stats_cache")
     .select("key, value")
     .in("key", keys);
 
+  if (error) return NextResponse.json({ error: "Failed to read cron status" }, { status: 500 });
+
   const map: Record<string, string | null> = Object.fromEntries(keys.map(k => [k, null]));
   for (const row of data || []) map[row.key] = row.value as string;
 
+  // Consider cron live only if started within the last 25 hours
+  const startedAt = map["cron_started_at"];
+  const isLive = !!startedAt && (Date.now() - new Date(startedAt).getTime()) < 25 * 60 * 60 * 1000;
+
   return NextResponse.json({
-    live: !!map["cron_started_at"],
+    live: isLive,
     startedAt: map["cron_started_at"],
     lastRuns: {
       job_discovery:   map["cron_last_job_discovery"],

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/ajays/AppData/Roaming/**)",
+      "Read(//c/Users/ajays/AppData/Local/Programs/**)",
+      "Bash(cmd /c \"node --version 2>nul || echo node_not_found\")"
+    ]
+  }
+}
