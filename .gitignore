@@ -2,6 +2,7 @@ node_modules
 .next/
 .env.local
 .env*.local
+.claude/
 build.log
 build2.log
 build3.log
