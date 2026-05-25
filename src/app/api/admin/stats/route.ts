@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
       .limit(100),
     // All jobs for accurate status counts
     supabase.from("jobs").select("status"),
-    supabase.from("agent_logs").select("*").order("run_at", { ascending: false }).limit(10),
+    supabase.from("agent_logs").select("*").order("run_at", { ascending: false }).limit(20),
     supabase.from("approvals").select("*").eq("status", "pending").order("created_at", { ascending: false }),
     supabase.from("interview_prep").select("*, jobs(title, company)").order("created_at", { ascending: false }).limit(5),
   ]);

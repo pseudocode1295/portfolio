@@ -1,20 +1,13 @@
 import { supabase } from "@/lib/supabase";
 import { isLocationAllowed } from "./location-filter";
+import { callGemini } from "@/lib/claude";
 import type { AgentResult } from "./types";
+export type { CompanyCategory, CompanyConfig } from "./company-list";
+export { COMPANIES } from "./company-list";
+import { COMPANIES } from "./company-list";
+import type { CompanyConfig } from "./company-list";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-export type CompanyCategory = "FAANG" | "Big Tech" | "Product" | "Indian Unicorn" | "MNC" | "AI/ML" | "Data & Infra" | "Analytics & Consulting";
-
-export interface CompanyConfig {
-  name: string;
-  slug: string;
-  category: CompanyCategory;
-  scrapeType: "greenhouse" | "lever" | "ashby" | "web" | "google" | "amazon" | "apple" | "microsoft";
-  boardId?: string;    // greenhouse / ashby board ID
-  companyId?: string;  // lever company slug
-  careersUrl?: string; // web scraper: ML-filtered careers page URL
-}
 
 export interface CompanyResult {
   name: string;
@@ -36,146 +29,6 @@ export interface CompanyProgress {
   companies: CompanyResult[];
 }
 
-// ─── Company List ─────────────────────────────────────────────────────────────
-
-export const COMPANIES: CompanyConfig[] = [
-  // ── FAANG (5) ──────────────────────────────────────────────────────────────
-  { name: "Google",    slug: "google",    category: "FAANG", scrapeType: "google" },
-  { name: "Amazon",    slug: "amazon",    category: "FAANG", scrapeType: "amazon" },
-  { name: "Apple",     slug: "apple",     category: "FAANG", scrapeType: "apple" },
-  { name: "Microsoft", slug: "microsoft", category: "FAANG", scrapeType: "microsoft" },
-  // Meta uses its own portal (not Greenhouse); Netflix uses Workday — both removed
-  { name: "Uber",      slug: "uber",      category: "FAANG", scrapeType: "greenhouse", boardId: "uberfreight" }, // verified
-
-  // ── Big Tech (10) ─────────────────────────────────────────────────────────
-  { name: "Airbnb",      slug: "airbnb",      category: "Big Tech", scrapeType: "greenhouse", boardId: "airbnb" },
-  { name: "LinkedIn",    slug: "linkedin",    category: "Big Tech", scrapeType: "greenhouse", boardId: "linkedin" },
-  { name: "Pinterest",   slug: "pinterest",   category: "Big Tech", scrapeType: "greenhouse", boardId: "pinterest" },
-  { name: "Lyft",        slug: "lyft",        category: "Big Tech", scrapeType: "greenhouse", boardId: "lyft" },
-  { name: "DoorDash",    slug: "doordash",    category: "Big Tech", scrapeType: "greenhouse", boardId: "doordashusa" }, // verified
-  { name: "Palantir",    slug: "palantir",    category: "Big Tech", scrapeType: "lever",      companyId: "palantir" },
-  { name: "Instacart",   slug: "instacart",   category: "Big Tech", scrapeType: "greenhouse", boardId: "instacart" },
-  { name: "Reddit",      slug: "reddit",      category: "Big Tech", scrapeType: "greenhouse", boardId: "reddit" },
-  { name: "Discord",     slug: "discord",     category: "Big Tech", scrapeType: "greenhouse", boardId: "discord" },
-  { name: "Duolingo",    slug: "duolingo",    category: "Big Tech", scrapeType: "greenhouse", boardId: "duolingo" },
-  // Adobe/Atlassian/Salesforce/Snap/Shopify/Twitter/X/Zoom use Workday or custom ATS — removed
-
-  // ── Product Companies (24) ────────────────────────────────────────────────
-  { name: "Stripe",      slug: "stripe",      category: "Product", scrapeType: "greenhouse", boardId: "stripe" },
-  { name: "Figma",       slug: "figma",       category: "Product", scrapeType: "greenhouse", boardId: "figma" },
-  { name: "Notion",      slug: "notion",      category: "Product", scrapeType: "ashby",      boardId: "notion" }, // uses Ashby
-  { name: "Dropbox",     slug: "dropbox",     category: "Product", scrapeType: "greenhouse", boardId: "dropbox" },
-  { name: "Grammarly",   slug: "grammarly",   category: "Product", scrapeType: "greenhouse", boardId: "grammarly" },
-  { name: "Twilio",      slug: "twilio",      category: "Product", scrapeType: "greenhouse", boardId: "twilio" },
-  { name: "Postman",     slug: "postman",     category: "Product", scrapeType: "greenhouse", boardId: "postman" }, // verified (was postmanlabs)
-  { name: "Gong",        slug: "gong",        category: "Product", scrapeType: "greenhouse", boardId: "gongio" }, // verified
-  { name: "Twitch",      slug: "twitch",      category: "Product", scrapeType: "greenhouse", boardId: "twitch" },
-  { name: "HubSpot",     slug: "hubspot",     category: "Product", scrapeType: "greenhouse", boardId: "hubspot" },
-  { name: "Datadog",     slug: "datadog",     category: "Product", scrapeType: "greenhouse", boardId: "datadog" }, // verified (was datadoghq)
-  { name: "Cloudflare",  slug: "cloudflare",  category: "Product", scrapeType: "greenhouse", boardId: "cloudflare" },
-  { name: "Coinbase",    slug: "coinbase",    category: "Product", scrapeType: "greenhouse", boardId: "coinbase" },
-  { name: "Airtable",    slug: "airtable",    category: "Product", scrapeType: "greenhouse", boardId: "airtable" },
-  { name: "Asana",       slug: "asana",       category: "Product", scrapeType: "greenhouse", boardId: "asana" },
-  { name: "Miro",        slug: "miro",        category: "Product", scrapeType: "greenhouse", boardId: "realtimeboardglobal" }, // verified
-  { name: "Robinhood",   slug: "robinhood",   category: "Product", scrapeType: "greenhouse", boardId: "robinhood" },
-  { name: "Plaid",       slug: "plaid",       category: "Product", scrapeType: "lever",      companyId: "plaid" }, // verified on Lever
-  { name: "Brex",        slug: "brex",        category: "Product", scrapeType: "greenhouse", boardId: "brex" }, // verified
-  { name: "Linear",      slug: "linear",      category: "Product", scrapeType: "ashby",      boardId: "linear" }, // Ashby
-  { name: "Ramp",        slug: "ramp",        category: "Product", scrapeType: "ashby",      boardId: "ramp" }, // Ashby
-  { name: "Deel",        slug: "deel",        category: "Product", scrapeType: "lever",      companyId: "deel" },
-  { name: "Box",         slug: "box",         category: "Product", scrapeType: "greenhouse", boardId: "box" },
-  { name: "Intercom",    slug: "intercom",    category: "Product", scrapeType: "greenhouse", boardId: "intercom" },
-  // Canva/Zendesk/Rippling/BrowserStack/Intuit/Zoom/Loom use Workday or custom ATS — removed
-
-  // ── Indian Unicorns & Startups (22) ───────────────────────────────────────
-  { name: "Razorpay",      slug: "razorpay",      category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "razorpay" },
-  { name: "Freshworks",    slug: "freshworks",    category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "freshworks" },
-  { name: "CRED",          slug: "cred",          category: "Indian Unicorn", scrapeType: "lever",      companyId: "cred" },
-  { name: "Meesho",        slug: "meesho",        category: "Indian Unicorn", scrapeType: "lever",      companyId: "meesho" },
-  { name: "Urban Company", slug: "urbancompany",  category: "Indian Unicorn", scrapeType: "lever",      companyId: "urbancompany" },
-  { name: "Groww",         slug: "groww",         category: "Indian Unicorn", scrapeType: "lever",      companyId: "groww" },
-  { name: "Zepto",         slug: "zepto",         category: "Indian Unicorn", scrapeType: "lever",      companyId: "zepto" },
-  { name: "PhonePe",       slug: "phonepe",       category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "phonepe" },
-  { name: "Swiggy",        slug: "swiggy",        category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "swiggy" },
-  { name: "Zomato",        slug: "zomato",        category: "Indian Unicorn", scrapeType: "lever",      companyId: "zomato" },
-  { name: "Nykaa",         slug: "nykaa",         category: "Indian Unicorn", scrapeType: "lever",      companyId: "nykaa" },
-  { name: "Chargebee",     slug: "chargebee",     category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "chargebee" },
-  { name: "CleverTap",     slug: "clevertap",     category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "clevertap" },
-  { name: "Dream11",       slug: "dream11",       category: "Indian Unicorn", scrapeType: "lever",      companyId: "dream11" },
-  { name: "Dunzo",         slug: "dunzo",         category: "Indian Unicorn", scrapeType: "lever",      companyId: "dunzo" },
-  { name: "Ola",           slug: "ola",           category: "Indian Unicorn", scrapeType: "lever",      companyId: "ola-cabs" },
-  { name: "Delhivery",     slug: "delhivery",     category: "Indian Unicorn", scrapeType: "lever",      companyId: "delhivery" },
-  { name: "MoEngage",      slug: "moengage",      category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "moengage" },
-  { name: "Darwinbox",     slug: "darwinbox",     category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "darwinbox" },
-  { name: "InMobi",        slug: "inmobi",        category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "inmobi" },
-  { name: "Leadsquared",   slug: "leadsquared",   category: "Indian Unicorn", scrapeType: "greenhouse", boardId: "leadsquared" },
-  { name: "Exotel",        slug: "exotel",        category: "Indian Unicorn", scrapeType: "lever",      companyId: "exotel" },
-
-  // ── MNCs in India (12) ────────────────────────────────────────────────────
-  { name: "PayPal",            slug: "paypal",    category: "MNC", scrapeType: "greenhouse", boardId: "paypal" },
-  { name: "Walmart Global Tech", slug: "walmart", category: "MNC", scrapeType: "greenhouse", boardId: "walmartglobaltech" },
-  { name: "Cisco",             slug: "cisco",     category: "MNC", scrapeType: "greenhouse", boardId: "cisco" },
-  { name: "Workday",           slug: "workday",   category: "MNC", scrapeType: "greenhouse", boardId: "workday" },
-  { name: "Wayfair",           slug: "wayfair",   category: "MNC", scrapeType: "greenhouse", boardId: "wayfair" },
-  { name: "ThoughtWorks",      slug: "thoughtworks", category: "MNC", scrapeType: "greenhouse", boardId: "thoughtworks" },
-  { name: "EPAM Systems",      slug: "epam",      category: "MNC", scrapeType: "greenhouse", boardId: "epamsystems" },
-  { name: "GlobalLogic",       slug: "globallogic", category: "MNC", scrapeType: "greenhouse", boardId: "globallogic" },
-  { name: "Publicis Sapient",  slug: "sapient",   category: "MNC", scrapeType: "lever",      companyId: "publicis-sapient" },
-  { name: "Elastic",           slug: "elastic",   category: "MNC", scrapeType: "greenhouse", boardId: "elastic" },
-  { name: "Splunk",            slug: "splunk",    category: "MNC", scrapeType: "greenhouse", boardId: "splunk" },
-  { name: "Okta",              slug: "okta",      category: "MNC", scrapeType: "greenhouse", boardId: "okta" },
-
-  // ── AI / ML Companies (10) ────────────────────────────────────────────────
-  { name: "OpenAI",              slug: "openai",      category: "AI/ML", scrapeType: "greenhouse", boardId: "openai" },
-  { name: "Anthropic",           slug: "anthropic",   category: "AI/ML", scrapeType: "lever",      companyId: "anthropic" },
-  { name: "Cohere",              slug: "cohere",      category: "AI/ML", scrapeType: "greenhouse", boardId: "cohere" },
-  { name: "Scale AI",            slug: "scaleai",     category: "AI/ML", scrapeType: "greenhouse", boardId: "scaleai" },
-  { name: "Hugging Face",        slug: "huggingface", category: "AI/ML", scrapeType: "lever",      companyId: "huggingface" },
-  { name: "Weights & Biases",    slug: "wandb",       category: "AI/ML", scrapeType: "greenhouse", boardId: "wandb" },
-  { name: "Stability AI",        slug: "stabilityai", category: "AI/ML", scrapeType: "lever",      companyId: "stability-ai" },
-  { name: "Mistral AI",          slug: "mistral",     category: "AI/ML", scrapeType: "lever",      companyId: "mistral" },
-  { name: "Runway",              slug: "runway",      category: "AI/ML", scrapeType: "lever",      companyId: "runwayml" },
-  { name: "Together AI",         slug: "togetherai",  category: "AI/ML", scrapeType: "greenhouse", boardId: "togetherai" },
-
-  // ── Data & Infrastructure (10) ────────────────────────────────────────────
-  { name: "MongoDB",     slug: "mongodb",     category: "Data & Infra", scrapeType: "greenhouse", boardId: "mongodb" },
-  { name: "Snowflake",   slug: "snowflake",   category: "Data & Infra", scrapeType: "greenhouse", boardId: "snowflake" },
-  { name: "Databricks",  slug: "databricks",  category: "Data & Infra", scrapeType: "greenhouse", boardId: "databricks" },
-  { name: "Confluent",   slug: "confluent",   category: "Data & Infra", scrapeType: "greenhouse", boardId: "confluent" },
-  { name: "HashiCorp",   slug: "hashicorp",   category: "Data & Infra", scrapeType: "greenhouse", boardId: "hashicorp" },
-  { name: "GitLab",      slug: "gitlab",      category: "Data & Infra", scrapeType: "greenhouse", boardId: "gitlab" },
-  { name: "PagerDuty",   slug: "pagerduty",   category: "Data & Infra", scrapeType: "greenhouse", boardId: "pagerduty" },
-  { name: "Vercel",      slug: "vercel",      category: "Data & Infra", scrapeType: "lever",      companyId: "vercel" },
-  { name: "Retool",      slug: "retool",      category: "Data & Infra", scrapeType: "greenhouse", boardId: "retool" },
-  { name: "Airbyte",     slug: "airbyte",     category: "Data & Infra", scrapeType: "greenhouse", boardId: "airbyte" },
-
-  // ── Analytics & Consulting ────────────────────────────────────────────────
-  // Public-API companies
-  { name: "Sigmoid",    slug: "sigmoid",    category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "sigmoid" }, // verified ✓
-  { name: "DataRobot",  slug: "datarobot",  category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "datarobot" },
-  { name: "H2O.ai",     slug: "h2oai",      category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "h2oai" },
-  { name: "Alteryx",    slug: "alteryx",    category: "Analytics & Consulting", scrapeType: "greenhouse", boardId: "alteryx" },
-  { name: "Quantiphi",  slug: "quantiphi",  category: "Analytics & Consulting", scrapeType: "lever",      companyId: "quantiphi" },
-  // Web-scraped (Workday / custom portal — no public API)
-  { name: "Fractal Analytics", slug: "fractal",       category: "Analytics & Consulting", scrapeType: "web",
-    careersUrl: "https://fractal.ai/careers/?s=machine+learning" },
-  { name: "Nagarro",           slug: "nagarro",       category: "Analytics & Consulting", scrapeType: "web",
-    careersUrl: "https://www.nagarro.com/en/careers/open-positions" },
-  { name: "Tiger Analytics",   slug: "tigeranalytics",category: "Analytics & Consulting", scrapeType: "web",
-    careersUrl: "https://www.tigeranalytics.com/careers/" },
-  { name: "PwC India",         slug: "pwc",           category: "Analytics & Consulting", scrapeType: "web",
-    careersUrl: "https://jobs.pwc.com/India/search?q=machine+learning&sortColumn=referencedate&sortDirection=desc" },
-  { name: "Deloitte India",    slug: "deloitte",      category: "Analytics & Consulting", scrapeType: "web",
-    careersUrl: "https://jobs.deloitte.com/india/search-jobs/machine-learning/222/1" },
-  { name: "Accenture India",   slug: "accenture",     category: "Analytics & Consulting", scrapeType: "web",
-    careersUrl: "https://www.accenture.com/in-en/careers/jobsearch?jk=machine+learning&sb=1&vw=0&is_rj=0&pg=1" },
-  { name: "Capgemini India",   slug: "capgemini",     category: "Analytics & Consulting", scrapeType: "web",
-    careersUrl: "https://www.capgemini.com/in-en/careers/job-search/?search_term=machine+learning" },
-  { name: "EXL Service",       slug: "exl",           category: "Analytics & Consulting", scrapeType: "web",
-    careersUrl: "https://jobs.exlservice.com/job-search-results/?keyword=machine+learning&location=India" },
-  { name: "ZS Associates",     slug: "zs",            category: "Analytics & Consulting", scrapeType: "web",
-    careersUrl: "https://www.zs.com/careers/find-a-job?jobfunction=Advanced%20Analytics%20%26%20Insights&location=India" },
-];
 
 // ─── ML/AI Relevance ──────────────────────────────────────────────────────────
 
@@ -541,15 +394,217 @@ async function scrapeMicrosoft(config: CompanyConfig): Promise<{ found: number; 
   return { found, saved };
 }
 
+// ─── Workday ──────────────────────────────────────────────────────────────────
+// boardId format: "tenant/board" → POST https://{tenant}.wd5.myworkdayjobs.com/wday/cxs/{tenant}/{board}/jobs
+
+interface WorkdayJob {
+  title?: string;
+  locationsText?: string;
+  externalPath?: string;
+  jobFamilyGroup?: string;
+}
+
+interface WorkdayResponse {
+  jobPostings?: WorkdayJob[];
+  total?: number;
+}
+
+async function scrapeWorkday(config: CompanyConfig): Promise<{ found: number; saved: number }> {
+  if (!config.boardId) throw new Error("boardId (tenant/board) required for workday");
+
+  const parts = config.boardId.split("/");
+  if (parts.length < 2) throw new Error("boardId must be 'tenant/board' format");
+  const [tenant, ...boardParts] = parts;
+  const board = boardParts.join("/");
+
+  const baseUrl = `https://${tenant}.wd5.myworkdayjobs.com`;
+  const apiUrl = `${baseUrl}/wday/cxs/${tenant}/${board}/jobs`;
+  const queries = ["machine learning", "data scientist", "artificial intelligence", "nlp engineer", "mlops"];
+
+  const seen = new Set<string>();
+  let found = 0, saved = 0;
+  let firstAttempt = true;
+
+  for (const q of queries) {
+    try {
+      const res = await fetchWithTimeout(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/plain, */*",
+          "Accept-Language": "en-US,en;q=0.9",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+          Origin: baseUrl,
+          Referer: `${baseUrl}/en-US/${board}`,
+        },
+        body: JSON.stringify({ appliedFacets: {}, limit: 20, offset: 0, searchText: q }),
+      });
+
+      if (!res.ok) {
+        // On first query, throw with status so it shows as "failed" in logs — not silently 0
+        if (firstAttempt) throw new Error(`HTTP ${res.status} — check boardId "${config.boardId}"`);
+        continue;
+      }
+      firstAttempt = false;
+
+      const data: WorkdayResponse = await res.json();
+      for (const job of (data.jobPostings || [])) {
+        const title = job.title || "";
+        const location = job.locationsText || "";
+        const path = job.externalPath || "";
+
+        if (!title || !path || seen.has(path)) continue;
+        seen.add(path);
+        if (!isMlRelevant(title)) continue;
+        if (location && !isLocationAllowed(location)) continue;
+
+        const jobUrl = `${baseUrl}${path}`;
+        found++;
+        const dept = job.jobFamilyGroup || "Engineering";
+        if (await saveJob(config, title, location || "India", jobUrl, `${config.name} · ${dept}`)) saved++;
+      }
+    } catch (err) {
+      throw err; // always surface errors so they appear in the Logs tab
+    }
+  }
+
+  return { found, saved };
+}
+
+// ─── LLM-powered scraper (Playwright + Gemini) ────────────────────────────────
+// For ATS platforms with no public API (Eightfold, Oracle HCM, etc.)
+// Renders the page with Playwright, sends content to Gemini, extracts jobs as JSON.
+
+async function scrapeLLM(config: CompanyConfig): Promise<{ found: number; saved: number }> {
+  if (!config.careersUrl) throw new Error("careersUrl required for llm scraper");
+
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+  });
+
+  let pageText = "";
+  let rawLinks: Array<{ text: string; href: string; context: string }> = [];
+
+  try {
+    const page = await browser.newPage();
+    await page.setExtraHTTPHeaders({
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+      "Accept-Language": "en-US,en;q=0.9",
+    });
+
+    // Use networkidle so JS-heavy SPAs (AmEx, JPMorgan) finish loading before extraction
+    await page.goto(config.careersUrl, { waitUntil: "networkidle", timeout: 45000 });
+    // Extra wait for lazy-loaded job lists that render after initial network idle
+    await page.waitForTimeout(4000);
+
+    // Extract all links with their surrounding text context
+    rawLinks = await page.evaluate(() => {
+      const results: Array<{ text: string; href: string; context: string }> = [];
+      const seen = new Set<string>();
+      const links = Array.from(document.querySelectorAll("a[href]")) as HTMLAnchorElement[];
+      for (const link of links) {
+        const text = link.textContent?.trim().replace(/\s+/g, " ") ?? "";
+        if (text.length < 4 || text.length > 200) continue;
+        if (seen.has(link.href)) continue;
+        seen.add(link.href);
+        const card = link.closest("li, article, [class*='job'], [class*='card'], [class*='position'], [class*='result'], [class*='opening']") ?? link.parentElement;
+        const context = card?.textContent?.trim().replace(/\s+/g, " ").slice(0, 150) ?? "";
+        results.push({ text, href: link.href, context });
+      }
+      return results;
+    });
+
+    // Get visible page text (main content area, capped at 12k chars)
+    pageText = await page.evaluate(() => {
+      const main = document.querySelector("main, [role='main'], #content, .content, [class*='job-list'], [class*='results']") ?? document.body;
+      return (main as HTMLElement).innerText?.replace(/\s+/g, " ").slice(0, 12000) ?? "";
+    });
+  } finally {
+    await browser.close();
+  }
+
+  if (!pageText && rawLinks.length === 0) throw new Error("Page rendered empty — may need auth or longer wait");
+
+  // Build prompt for Gemini
+  const linkSummary = rawLinks
+    .slice(0, 120)
+    .map(l => `"${l.text}" → ${l.href}${l.context ? ` | ctx: ${l.context.slice(0, 100)}` : ""}`)
+    .join("\n");
+
+  const prompt = `You are parsing a job listings page for ${config.name}.
+Extract every individual job posting you can find. For each job return:
+- title: the exact job title
+- location: city/country where the role is based (empty string if not found)
+- url: the direct URL to that specific job posting
+
+Page URL: ${config.careersUrl}
+
+Page text (first 12k chars):
+${pageText}
+
+Links on page:
+${linkSummary}
+
+Return ONLY a valid JSON array, no markdown, no explanation:
+[{"title":"...","location":"...","url":"..."}]
+
+Only include actual job postings. Skip navigation links, category pages, and non-job links.`;
+
+  const response = await callGemini(
+    "You extract job listings from career pages. Return only valid JSON arrays.",
+    prompt,
+    4096,
+  );
+
+  // Parse LLM response — strip markdown fences if present
+  let jobs: Array<{ title: string; location: string; url: string }> = [];
+  try {
+    const cleaned = response.replace(/```json\n?|```\n?/g, "").trim();
+    const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (jsonMatch) jobs = JSON.parse(jsonMatch[0]);
+  } catch {
+    throw new Error(`LLM returned unparseable response: ${response.slice(0, 200)}`);
+  }
+
+  let found = 0, saved = 0;
+  const seen = new Set<string>();
+
+  for (const job of jobs) {
+    const title = (job.title || "").trim();
+    const location = (job.location || "").trim();
+    const url = (job.url || "").trim();
+    if (!title || !url || seen.has(url)) continue;
+    seen.add(url);
+    if (!isMlRelevant(title)) continue;
+    if (location && !isLocationAllowed(location)) continue;
+    found++;
+    if (await saveJob(config, title, location || "India", url, `${config.name} careers`)) saved++;
+  }
+
+  return { found, saved };
+}
+
 // ─── Main Agent ───────────────────────────────────────────────────────────────
 
-export async function runCompanyScraperAgent(): Promise<AgentResult> {
+export async function runCompanyScraperAgent(slugs?: string[], customCompanies?: CompanyConfig[]): Promise<AgentResult> {
   const startTime = Date.now();
 
-  // Deduplicate companies (browserstack appears twice in list above — fix at runtime)
-  const companies = COMPANIES.filter(
-    (c, i, arr) => arr.findIndex(x => x.slug === c.slug) === i,
-  );
+  let companies: CompanyConfig[];
+  if (customCompanies?.length) {
+    // Scrape user-provided companies not in the predefined list
+    companies = customCompanies;
+  } else {
+    // Deduplicate companies (browserstack appears twice in list above — fix at runtime)
+    const allCompanies = COMPANIES.filter(
+      (c, i, arr) => arr.findIndex(x => x.slug === c.slug) === i,
+    );
+    // If specific slugs requested, filter to just those; otherwise run all
+    companies = slugs?.length
+      ? allCompanies.filter(c => slugs.includes(c.slug))
+      : allCompanies;
+  }
 
   const { data: logEntry } = await supabase
     .from("agent_logs")
@@ -612,6 +667,15 @@ export async function runCompanyScraperAgent(): Promise<AgentResult> {
           case "amazon":     r = await scrapeAmazon(company);     break;
           case "apple":      r = await scrapeApple(company);      break;
           case "microsoft":  r = await scrapeMicrosoft(company);  break;
+          case "workday":    r = await scrapeWorkday(company);    break;
+          case "llm":
+            if (process.env.VERCEL) {
+              console.log(`[company-scraper] Skipping LLM/Playwright scraper on Vercel (no Chromium): ${company.name}`);
+              r = { found: 0, saved: 0 };
+            } else {
+              r = await scrapeLLM(company);
+            }
+            break;
           default:           r = { found: 0, saved: 0 };
         }
 

@@ -5,6 +5,9 @@ import { runEmailMonitorAgent, runJobEmailScraperAgent } from "@/lib/agents/emai
 import { runInterviewPrepAgent } from "@/lib/agents/interview-prep";
 import { runCompanyScraperAgent } from "@/lib/agents/company-scraper";
 
+// Allow up to 60s — needed for scraper agents (Vercel Hobby max)
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   if (!isAdminAuthenticated(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -14,7 +17,7 @@ export async function POST(req: NextRequest) {
     case "job_discovery": return NextResponse.json(await runJobDiscoveryAgent());
     case "email_monitor": return NextResponse.json(await runEmailMonitorAgent());
     case "job_email_scraper": return NextResponse.json(await runJobEmailScraperAgent(payload?.daysBack ?? 30));
-    case "company_scraper": return NextResponse.json(await runCompanyScraperAgent());
+    case "company_scraper": return NextResponse.json(await runCompanyScraperAgent(payload?.slugs, payload?.customCompanies));
     case "interview_prep": {
       if (!payload?.jobId) return NextResponse.json({ error: "jobId required" }, { status: 400 });
       return NextResponse.json(await runInterviewPrepAgent(payload.jobId, payload.emailId));

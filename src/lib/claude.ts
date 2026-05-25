@@ -1,12 +1,13 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Gemini client (free tier)
+// ─── Gemini ────────────────────────────────────────────────────────────────────
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-export async function callGemini(
+async function _callGemini(
   systemPrompt: string,
   userMessage: string,
-  maxTokens = 4096
+  maxTokens: number,
 ): Promise<string> {
   const model = genAI.getGenerativeModel({
     model: "gemini-2.0-flash",
@@ -17,7 +18,61 @@ export async function callGemini(
   return result.response.text();
 }
 
-// Profile context used by all agents
+// ─── Groq (fallback — OpenAI-compatible, free tier) ────────────────────────────
+
+async function _callGroq(
+  systemPrompt: string,
+  userMessage: string,
+  maxTokens: number,
+): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("GROQ_API_KEY not set");
+
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user",   content: userMessage },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.3,
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+
+  if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+// ─── callGemini — tries Gemini first, falls back to Groq on rate-limit/error ──
+
+export async function callGemini(
+  systemPrompt: string,
+  userMessage: string,
+  maxTokens = 4096,
+): Promise<string> {
+  try {
+    return await _callGemini(systemPrompt, userMessage, maxTokens);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isRateLimit = msg.includes("429") || msg.includes("quota") || msg.includes("rate") || msg.includes("Resource has been exhausted");
+    console.warn(`[llm] Gemini ${isRateLimit ? "rate-limited" : "failed"} — falling back to Groq. Error: ${msg}`);
+    return await _callGroq(systemPrompt, userMessage, maxTokens);
+  }
+}
+
+// Alias so existing agent imports don't break
+export const callClaude = callGemini;
+
+// ─── Profile context used by all agents ───────────────────────────────────────
+
 export const AJAY_PROFILE = `
 Name: Ajay Kumar
 Current Role: Senior Software Engineer 2 (ML/AI) at Microsoft
@@ -43,6 +98,3 @@ Certifications: Azure AI Engineer, Azure Data Scientist, Azure Developer Associa
 
 Target Roles: ML Engineer, Senior ML Engineer, GenAI Engineer, AI Platform Engineer, AI/ML Lead
 `;
-
-// Alias so existing agent imports don't break
-export const callClaude = callGemini;
